@@ -1,0 +1,375 @@
+/*
+ * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. The names of its contributors may not be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <string.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <grp.h>
+#include <pwd.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include "dns.h"
+
+#define MODULE "util"
+
+static int util_sin_compare(struct sockaddr_in *a, struct sockaddr_in *b);
+static int util_sin6_compare(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
+
+void
+dns_util_strlcpy(char *dst, char *src, int max)
+{
+    strncpy(dst, src, max);
+    dst[max - 1] = 0;
+}
+
+void
+dns_util_strlcat(char *dst, char *src, int max)
+{
+    int len;
+
+    len = strlen(dst);
+    dns_util_strlcpy(dst + len, src, max - len);
+}
+
+void
+dns_util_strlower(char *str)
+{
+    for (; *str != 0; str++)
+        *str = tolower(*str);
+}
+
+void
+dns_util_sigmaskall(void)
+{
+    sigset_t mask;
+
+    sigfillset(&mask);
+    pthread_sigmask(SIG_BLOCK, &mask, NULL);
+}
+
+void
+dns_util_sacopy(struct sockaddr *dst, struct sockaddr *src)
+{
+    switch (src->sa_family) {
+    case AF_INET:
+        memcpy(dst, src, sizeof(struct sockaddr_in));
+        break;
+
+    case AF_INET6:
+        memcpy(dst, src, sizeof(struct sockaddr_in6));
+        break;
+    }
+}
+
+void
+dns_util_sasetport(struct sockaddr *sa, uint16_t port)
+{
+    struct sockaddr_in *sin;
+    struct sockaddr_in6 *sin6;
+
+    switch (sa->sa_family) {
+    case AF_INET:
+        sin = (struct sockaddr_in *) sa;
+        sin->sin_port = htons(port);
+        break;
+
+    case AF_INET6:
+        sin6 = (struct sockaddr_in6 *) sa;
+        sin6->sin6_port = htons(port);
+        break;
+    }
+}
+
+int
+dns_util_sagetport(struct sockaddr *sa)
+{
+    struct sockaddr_in *sin;
+    struct sockaddr_in6 *sin6;
+
+    switch (sa->sa_family) {
+    case AF_INET:
+        sin = (struct sockaddr_in *) sa;
+        return ntohs(sin->sin_port);
+
+    case AF_INET6:
+        sin6 = (struct sockaddr_in6 *) sa;
+        return ntohs(sin6->sin6_port);
+    }
+
+    return -1;
+}
+
+int
+dns_util_sacompare(struct sockaddr *a, struct sockaddr *b)
+{
+    switch (a->sa_family) {
+    case AF_INET:
+        return util_sin_compare((struct sockaddr_in *) a, (struct sockaddr_in *) b);
+
+    case AF_INET6:
+        return util_sin6_compare((struct sockaddr_in6 *) a, (struct sockaddr_in6 *) b);
+    }
+
+    return -1;
+}
+
+int
+dns_util_str2sa(struct sockaddr *sa, char *addr, uint16_t port)
+{
+    struct addrinfo hints, *res;
+    
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = PF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (getaddrinfo(addr, NULL, &hints, &res) != 0) {
+        plog_error(LOG_ERR, MODULE, "getaddrinfo() failed");
+        return -1;
+    }
+
+    memcpy(sa, res->ai_addr, SALEN(res->ai_addr));
+    freeaddrinfo(res);
+
+    dns_util_sasetport(sa, port);
+
+    return 0;
+}
+
+int
+dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa)
+{
+    return getnameinfo(sa, SALEN(sa), buf, bufmax, NULL, 0, NI_NUMERICHOST);
+}
+
+int
+dns_util_socket(int type, int port)
+{
+    struct sockaddr_in sin;
+
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    dns_util_sasetport((SA *) &sin, port);
+
+    return dns_util_socksa(type, (SA *) &sin);
+}
+
+int
+dns_util_socksa(int type, struct sockaddr *sa)
+{
+    int s, on = 1;
+
+    if ((s = socket(PF_INET, type, 0)) < 0) {
+        plog_error(LOG_ERR, MODULE, "socket() failed");
+        return -1;
+    }
+
+    if (type == SOCK_STREAM) {
+        if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+            plog_error(LOG_ERR, MODULE, "setsockopt() failed");
+            return -1;
+        }
+    }
+
+    if (bind(s, (SA *) sa, SALEN(sa)) < 0) {
+        plog_error(LOG_ERR, MODULE, "bind() failed");
+        return -1;
+    }
+
+    return s;
+}
+
+int
+dns_util_select(int s, int timeout)
+{
+    int r;
+    fd_set fds;
+    struct timeval tv, *timo;
+
+    FD_ZERO(&fds);
+    FD_SET(s, &fds);
+
+    tv.tv_sec = timeout;
+    tv.tv_usec = 0;
+
+again:
+    timo = (timeout > 0) ? &tv : NULL;
+    if ((r = select(s + 1, &fds, NULL, NULL, timo)) < 0) {
+        if (errno == EAGAIN || errno == EINTR)
+            goto again;
+
+        plog_error(LOG_ERR, MODULE, "select() failed");
+    }
+
+    if (r > 0 && FD_ISSET(s, &fds))
+        return 0;
+
+    return -1;
+}
+
+int
+dns_util_sendf(int s, char *fmt, ...)
+{
+    char msg[256];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
+    return send(s, msg, strlen(msg), 0);
+}
+
+int
+dns_util_getuid(char *user)
+{
+    char buf[256];
+    struct passwd pwd, *r;
+
+    if (getpwnam_r(user, &pwd, buf, sizeof(buf), &r) < 0)
+        return -1;
+
+    return (r != NULL) ? r->pw_uid : -1;
+}
+
+int
+dns_util_getgid(char *group)
+{
+    char buf[256];
+    struct group grp, *r;
+
+    if (getgrnam_r(group, &grp, buf, sizeof(buf), &r) < 0)
+        return -1;
+
+    return (r != NULL) ? r->gr_gid : -1;
+}
+
+int
+dns_util_setugid(int uid, int gid)
+{
+    if (gid > 0) {
+        if (setgid(gid) < 0) {
+            plog_error(LOG_ERR, NULL, "setgid() failed");
+            return -1;
+        }
+    }
+
+    if (uid > 0) {
+        if (setuid(uid) < 0) {
+            plog_error(LOG_ERR, NULL, "setuid() failed");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int
+dns_util_fexist(char *filename)
+{
+    struct stat sb;
+
+    return (stat(filename, &sb) < 0) ? 0 : 1;
+}
+
+unsigned
+dns_util_hash_initial(void)
+{
+    return FNV1_INITIAL_BASIS;
+}
+
+unsigned
+dns_util_hash_calc(void *buf, int len, unsigned basis)
+{
+    int i;
+    unsigned hash = basis;
+
+    /* FNV-1a hash */
+    for (i = 0; i < len; i++) {
+        hash ^= *((unsigned char *) buf);
+        hash *= 16777619;
+        buf = ((unsigned char *) buf) + 1;
+    }
+
+    return hash;
+}
+
+unsigned
+dns_util_euler_primish(unsigned n)
+{
+    unsigned i, value;
+
+    for (i = 0; i < 1000; i++) {
+        value = (i * i) + i + 41;
+        if (value > n)
+            return value;
+    }
+
+    return n;
+}
+
+static int
+util_sin_compare(struct sockaddr_in *a, struct sockaddr_in *b)
+{
+    int r;
+
+    if ((r = a->sin_family - b->sin_family) != 0)
+        return r;
+    if ((r = a->sin_port - b->sin_port) != 0)
+        return r;
+    if ((r = memcmp(&a->sin_addr, &b->sin_addr, sizeof(a->sin_addr))) != 0)
+        return r;
+
+    return 0;
+}
+
+static int
+util_sin6_compare(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
+{
+    int r;
+
+    if ((r = a->sin6_family - b->sin6_family) != 0)
+        return r;
+    if ((r = a->sin6_port - b->sin6_port) != 0)
+        return r;
+    if ((r = memcmp(&a->sin6_addr, &b->sin6_addr, sizeof(a->sin6_addr))) != 0)
+        return r;
+
+    return 0;
+}

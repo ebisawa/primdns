@@ -1,0 +1,874 @@
+#!/usr/bin/env ruby
+#
+#  Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions
+#  are met:
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in
+#     the documentation and/or other materials provided with the
+#     distribution.
+#  3. The names of its contributors may not be used to endorse or promote
+#     products derived from this software without specific prior written
+#     permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+#  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+#  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+#  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+#  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+#  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+#  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+#  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+#  POSSIBILITY OF SUCH DAMAGE.
+#
+require 'date'
+require 'optparse'
+
+FILE_MAGIC = 0x61727964   # "aryd"
+FILE_VERSION = 1
+
+def primish(n)
+  n * n + n + 41
+end
+
+def get_hashsize(count)
+  (0..1000).each do |n|
+    v = primish(n)
+    if (count / v) < 32
+      return v
+    end
+  end
+  return v
+end
+
+#
+#  DATA FILE FORMAT:
+#
+#                          1                   2                   3
+#      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                             Magic                             !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !            RESERVED           !            Version            !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                           Hash Size                           !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                                                               !
+#     ~                          Hash Entries                         ~
+#     !                                                               !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                                                               !
+#     ~                           Data Blocks                        ~
+#     !                                                               !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#
+#
+#  HASH ENTRY:
+#
+#                          1                   2                   3
+#      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                            Offset                             !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                      Number of Resources                      !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#
+#
+# DATA BLOCK:
+#
+#                          1                   2                   3
+#      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                                                               !
+#     ~                       Resource Indexes                        ~
+#     !                                                               !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                                                               !
+#     ~                       Domain Name Area                        ~
+#     !                                                               !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                                                               !
+#     ~                           Data Area                           ~
+#     !                                                               !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#
+
+class DataFile
+  def initialize(hashsize)
+    @hashsize = hashsize
+    @block = []
+
+    @hashsize.times do |index|
+      @block[index] = DataBlock.new
+    end
+  end
+
+  def push_records(records)
+    records.each do |rec|
+      index = hash_index(rec.r_name)
+      if rec.r_type == Record::DNS_TYPE_SOA
+        if @block[index].find_record(rec.r_name, rec.r_type)
+          next   # SOA record duplicated - ignore it
+        end
+      end
+      @block[index].push_record(rec)
+    end
+  end
+
+  def write_file(io)
+    io.write(header)
+
+    # skip hash index
+    pos_hash = io.pos
+    io.seek(8 * @hashsize, IO::SEEK_CUR)
+
+    hashtab = []
+    @hashsize.times do |index|
+      data = @block[index].serialize(io.pos)
+      hashtab[index] = [ io.pos, @block[index].count_record ]
+
+      if $options[:debug]
+        STDERR.puts "DEBUG: block #{index}: offset #{hashtab[index][0]} records #{hashtab[index][1]}"
+      end
+
+      io.write(data)
+    end
+
+    io.pos = pos_hash
+    @hashsize.times do |index|
+      io.write(hashtab[index].pack("NN"))
+    end
+  end
+
+  def header
+    [ FILE_MAGIC, 0, FILE_VERSION, @hashsize ].pack("NnnN")
+  end
+
+  def hash_index(name)
+    # 32bit FNV-1a hash
+    value = 2166136261
+    dname = name.downcase
+    dname.size.times do |i|
+      value ^= dname[i]
+      value *= 16777619
+      value &= 0xffffffff
+    end
+
+    if $options[:debug]
+      STDERR.puts "DEBUG: hash #{name}: value #{value} index #{value % @hashsize}"
+    end
+
+    value % @hashsize
+  end
+end
+
+class DataBlock
+  def initialize
+    @resindex = []
+    @name_buf = ""
+    @data_buf = ""
+    @name_cache = {}
+  end
+
+  def push_record(record)
+    name = record.r_name + "\0"
+    data = record.r_data
+    data_len = align(data.size)
+
+    # padding
+    pad_len = data_len - data.size
+    pad_len.times { data += "\0" }
+
+    if @name_cache[name] == nil
+      @name_cache[name] = @name_buf.size
+      @name_buf += name
+    end
+
+    record.ri_name = @name_cache[name]
+    record.ri_data = @data_buf.size
+
+    @resindex.push(record)
+    @data_buf += data
+  end
+
+  def find_record(name, type)
+    @resindex.find {|a| a.r_name == name && a.r_type == type }
+  end
+
+  def count_record
+    @resindex.size
+  end
+
+  def serialize(file_offset)
+    offs_res = file_offset
+    offs_name = offs_res + (@resindex.size * RESOURCE_INDEX_SIZE)
+    offs_data = offs_name + @name_buf.size
+
+    @resindex.sort! do |a,b|
+      r = a.r_name <=> b.r_name
+      r = a.r_class <=> b.r_class if r == 0
+      r = a.r_type <=> b.r_type if r == 0
+      r = a.r_data <=> b.r_data if r == 0
+      r
+    end
+
+    name_last = nil
+    name_index = 0
+
+    rs = @resindex.map do |res|
+      if res.r_name == name_last
+        name_index += 1
+      else
+        name_last = res.r_name
+        name_index = 0
+      end
+      res.serialize(offs_name + res.ri_name, offs_data + res.ri_data, name_index)
+    end
+    resindex = rs.join
+
+    return resindex + @name_buf + @data_buf
+  end
+
+  def align(len)
+    ((len + 3) / 4) * 4
+  end
+end
+
+#
+#  RESOURCE INDEX:
+#
+#                          1                   2                   3
+#      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !             TYPE              !             CLASS             !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                              TTL                              !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !           Name Lenth          !           Data Length         !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                          Name Offset                          !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                          Data Offset                          !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#
+RESOURCE_INDEX_SIZE = 20
+
+class Record
+  attr_reader :r_name, :r_ttl, :r_data
+  attr_accessor :ri_name, :ri_data
+
+  DNS_CLASS_IN = 1
+
+  DNS_TYPE_A = 1
+  DNS_TYPE_NS = 2
+  DNS_TYPE_CNAME = 5
+  DNS_TYPE_SOA = 6
+  DNS_TYPE_PTR = 12
+  DNS_TYPE_MX = 15
+  DNS_TYPE_TXT = 16
+  DNS_TYPE_AAAA = 28
+
+  def r_class
+    DNS_CLASS_IN
+  end
+
+  def conv_dnsname(name)
+    result = ""
+    na = name.split(".")
+    na.each do |np|
+      len = np.size;
+      result += [ len ].pack("C")
+      result += np
+    end
+    result += "\0"
+    result
+  end
+
+  def serialize(name_pos, data_pos, name_index)
+    name_len = self.r_name.size + 1
+    data_len = self.r_data.size
+
+    h = [ self.r_type.to_i, self.r_class.to_i, self.r_ttl.to_i, name_len, data_len, name_pos, data_pos ]
+    h.pack("nnNnnNN")
+  end
+end
+
+class RecordA < Record
+  def initialize(name, ipaddr, ttl)
+    @r_name = name
+    @r_data = conv_ipaddr(ipaddr)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_A
+  end
+
+  def conv_ipaddr(ipaddr_str)
+    if ipaddr_str =~ /(\d+)\.(\d+)\.(\d+)\.(\d+)/
+      a = [ $1.to_i, $2.to_i, $3.to_i, $4.to_i ]
+      return a.pack("CCCC")
+    end
+    raise "invalid ip address"
+  end
+end
+
+class RecordNS < Record
+  def initialize(name, ns, ttl)
+    @r_name = name
+    @r_data = conv_dnsname(ns)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_NS
+  end
+end
+
+class RecordCNAME < Record
+  def initialize(name, cname, ttl)
+    @r_name = name
+    @r_data = conv_dnsname(cname)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_CNAME
+  end
+end
+
+class RecordSOA < Record
+  def initialize(name, mname, rname, serial, refresh, tretry, expire, minimum, ttl)
+    @r_name = name
+    @r_data = conv_soa(mname, rname, serial, refresh, tretry, expire, minimum)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_SOA
+  end
+
+  def conv_soa(mname, rname, serial, refresh, tretry, expire, minimum)
+    result = ""
+    result += conv_dnsname(mname)
+    result += conv_dnsname(rname)
+    result += [ serial, refresh, tretry, expire, minimum ].pack("NNNNN")
+    result
+  end
+end
+
+class RecordPTR < Record
+  def initialize(ipaddr, name, ttl)
+    @r_name = conv_ptrname(ipaddr)
+    @r_data = conv_dnsname(name)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_PTR
+  end
+
+  def conv_ptrname(ipaddr_str)
+    if ipaddr_str =~ /(\d+)\.(\d+)\.(\d+)\.(\d+)/
+      return "#{$4}.#{$3}.#{$2}.#{$1}.in-addr.arpa"
+    end
+    raise "invalid ip address"
+  end
+end
+
+class RecordPTR2 < Record
+  def initialize(ptrname, name, ttl)
+    @r_name = ptrname
+    @r_data = conv_dnsname(name)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_PTR
+  end
+end
+
+class RecordMX < Record
+  def initialize(name, pref, ename, ttl)
+    @r_name = name
+    @r_data = conv_mx(pref, ename)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_MX
+  end
+
+  def conv_mx(pref, ename)
+    result = ""
+    result += [ pref ].pack("n")
+    result += conv_dnsname(ename)
+    result
+  end
+end
+
+class RecordTXT < Record
+  def initialize(name, txt, ttl)
+    @r_name = name
+    @r_data = conv_txt(txt)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_TXT
+  end
+
+  def conv_txt(txt)
+    raise "too long text" if txt.size > 255
+    [ txt.size ].pack("C") + txt
+  end
+end
+
+class RecordAAAA < Record
+  def initialize(name, ipaddr6, ttl)
+    @r_name = name
+    @r_data = conv_ipaddr6(ipaddr6)
+    @r_ttl = ttl
+  end
+
+  def r_type
+    DNS_TYPE_AAAA
+  end
+
+  def conv_ipaddr6(ipaddr6)
+    t = ipaddr6.split(/(::)/)
+    t.delete("")
+
+    u = t.map {|x| (x == "::") ? x : x.split(":") }.flatten
+    v = u.map {|x| (x == "::") ? ([ 0 ] * (8 - u.size + 1)) : x.hex }.flatten
+
+    v.pack("n8")
+  end
+end
+
+
+class BaseZone
+  def backup_db(dstname)
+    bakname = "#{dstname}.bak"
+    File.unlink(bakname) if File.exist?(bakname)
+    File.rename(dstname, bakname) if File.exist?(dstname)
+  end
+end
+
+class TinyZone < BaseZone
+  DEFAULT_TTL = 86400
+
+  def makedb(dstname, srcname)
+    count = count_records(srcname)
+    hashsize = get_hashsize(count)
+    datafile = DataFile.new(hashsize)
+
+    proc_source(srcname) do |t, params|
+      r = make_record(t, params)
+      datafile.push_records(r) if r != nil
+    end
+
+    backup_db(dstname)
+    open(dstname, "w") do |io|
+      datafile.write_file(io)
+    end
+  end
+
+  private
+  def count_records(srcname)
+    count = 0
+    proc_source(srcname) do |t, params|
+      r = make_record(t, params)
+      count += r.size if r != nil
+    end
+    count
+  end
+
+  def proc_source(srcname)
+    open(srcname) do |io|
+      io.each do |line|
+        line.chomp!; next if line =~ /^\s*$/
+        t = line[0].chr; line = line[1..-1]
+        params = line.split(":")
+        yield(t, params)
+      end
+    end
+  end
+
+  def ttl(param)
+    (param != nil) ? param : DEFAULT_TTL
+  end
+
+  def make_record(t, params)
+    r = nil
+    case t
+    when '-';  # nop
+    when '+';  r = make_record_a(params)
+    when 'C';  r = make_record_cname(params)
+    when 'Z';  r = make_record_soa(params)
+    when '^';  r = make_record_ptr(params)
+    when '=';  r = make_record_a_ptr(params)
+    when '&';  r = make_record_ns_a(params)
+    when '.';  r = make_record_soa_ns_a(params)
+    end
+    return r
+  end
+
+  def make_record_a(params)
+    [ RecordA.new(params[0], params[1], ttl(params[2])) ]
+  end
+
+  def make_record_cname(params)
+    [ RecordCNAME.new(params[0], params[1], ttl(params[2])) ]
+  end
+
+  def make_record_soa(params)
+    [ RecordSOA.new(params[0], params[1], params[2], ttl(params[8])) ]
+  end
+
+  def make_record_ptr(params)
+    [ RecordPTR2.new(params[0], params[1], ttl(params[2])) ]
+  end
+
+  def make_record_a_ptr(params)
+    record_a = RecordA.new(params[0], params[1], ttl(params[2]))
+    record_ptr = RecordPTR.new(params[1], params[0], ttl(params[2]))
+
+    [ record_a, record_ptr ]
+  end
+
+  def make_record_ns_a(params)
+    if params[2] =~ /^\d+$/
+      mname = "#{params[2]}.ns.#{params[0]}"
+    else
+      mname = params[2]
+    end
+    rname = "hostmaster.#{params[0]}"
+
+    record_ptr = RecordNS.new(params[0], mname, ttl(params[3]))
+    record_a = RecordA.new(mname, params[1], ttl(params[3]))
+
+    [ record_ptr, record_a ]
+  end
+
+  def make_record_soa_ns_a(params)
+    if params[2] =~ /^\d+$/
+      mname = "#{params[2]}.ns.#{params[0]}"
+    else
+      mname = params[2]
+    end
+    rname = "hostmaster.#{params[0]}"
+
+    record_soa = RecordSOA.new(params[0], mname, rname, Time.now.to_i, 16384, 2048, 1048576, 2560, ttl(params[3]))
+    record_ptr = RecordNS.new(params[0], mname, ttl(params[3]))
+    record_a = RecordA.new(mname, params[1], ttl(params[3]))
+
+    [ record_soa, record_ptr, record_a ]
+  end
+end
+
+class BindZone < BaseZone
+  def initialize
+    @origin = ""
+    @last_name = ""
+    @ttl = 86400
+  end
+
+  def makedb(dstname, srcname)
+    count = count_records(srcname)
+    hashsize = get_hashsize(count)
+    datafile = DataFile.new(hashsize)
+
+    proc_source(srcname) do |r|
+      datafile.push_records(r)
+    end
+
+    backup_db(dstname)
+    open(dstname, "w") do |io|
+      datafile.write_file(io)
+    end
+  end
+
+  private
+  def proc_source(srcname)
+    lines = []
+    open(srcname) do |io|
+      io.each do |line|
+        line.chomp!
+        line.gsub!(/;.*$/, '')
+        line.gsub!(/\s+$/, '')
+        next if line =~ /^\s*$/
+        lines.push(line)
+      end
+    end
+
+    loop do
+      break if (line = lines.shift) == nil
+      blank_name = (line =~ /^\s/) ? true : false
+      tokens = split_line(line)
+
+      if tokens.include?('(')
+        concat_tokens(tokens, lines)
+      end
+
+      r = proc_line(tokens, blank_name)
+      yield(r) if r != nil
+    end
+  end
+
+  def split_line(line)
+    t2 = []
+    no_split = false
+
+    line.split(/(")/).each do |t|
+      if t == '"'
+        no_split = !no_split
+      else
+        if no_split
+          t2.push(t)
+        else
+          t2.concat(t.split)
+        end
+      end
+    end
+    t2
+  end
+
+  def count_records(srcname)
+    count = 0
+    proc_source(srcname) do |r|
+      count += r.size
+    end
+    count
+  end
+
+  def concat_tokens(tokens, lines)
+    loop do
+      break if (line = lines.shift) == nil
+      t = split_line(line)
+      tokens.concat(t)
+      break if t.include?(')')
+    end
+    tokens.delete('(')
+    tokens.delete(')')
+  end
+
+  def proc_line(tokens, blank_name)
+    if blank_name
+      return [ parse_record(nil, tokens) ]
+    else
+      t = tokens.shift
+      case t
+      when '$ORIGIN'
+        @origin = tokens.shift
+        @origin.gsub!(/(.*)\.$/, '\1')
+        @last_name = @origin
+      when '$TTL'
+        @ttl = parse_ttl(tokens.shift)
+        raise "invalid ttl" if @ttl == nil
+      else
+        return [ parse_record(t, tokens) ]
+      end
+    end
+    nil
+  end
+
+  def parse_record(t, tokens)
+    # tokens => (<ttl>) (<class>) (<ttl>) <type> <rdata>
+    r_type = nil
+    r_ttl = @ttl
+    r_name = (t != nil) ? t : @last_name
+
+    type_index = nil
+    tokens.each_with_index do |tok, index|
+      if is_type?(tok)
+        type_index = index
+      end
+    end
+
+    if type_index == nil
+      raise "invalid record format"
+    end
+
+    loop do
+      if (t = tokens.shift) == nil
+        raise "unexpected end of line"
+      end
+      if is_type?(t)
+        r_type = t
+        break
+      elsif (x = parse_ttl(t)) != nil
+        r_ttl = x
+      end
+    end
+
+    @last_name = r_name
+    proc_record(r_type, r_name, r_ttl, tokens)
+  end
+
+  def parse_ttl(ttl_string)
+    value = 0
+    r = ttl_string.downcase
+
+    loop do
+      return nil if r !~ /(\d+)([a-z]*)(.*)/
+      return nil if $1 == ''
+
+      n = $1.to_i; m = $2; r = $3
+
+      case m
+      when 'w';  mul = 60 * 60 * 24 * 7
+      when 'd';  mul = 60 * 60 * 24
+      when 'h';  mul = 60 * 60
+      when 'm';  mul = 60
+      when 's';  mul = 1
+      when '';   mul = 1
+      else;      return nil
+      end
+
+      value += n * mul
+      break if r == nil || r == ''
+    end
+    value
+  end
+
+  def is_class?(class_string)
+    t = class_string.upcase
+    case t
+    when "IN";  return true
+    when "CS", "CH", "HS"
+      raise "unsupported class"
+    end
+    false
+  end
+
+  def is_type?(class_string)
+    t = class_string.upcase
+    case t
+    when "A";      return true
+    when "NS";     return true
+    when "CNAME";  return true
+    when "SOA";    return true
+    when "PTR";    return true
+    when "MX";     return true
+    when "TXT";    return true
+    when "AAAA";   return true
+    end
+    false
+  end
+
+  def proc_record(type_string, name, ttl, tokens)
+    t = type_string.upcase
+    name = fqdn(name)
+
+    case t
+    when "A";      return make_record_a(name, ttl, tokens)
+    when "NS";     return make_record_ns(name, ttl, tokens)
+    when "CNAME";  return make_record_cname(name, ttl, tokens)
+    when "SOA";    return make_record_soa(name, ttl, tokens)
+    when "PTR";    return make_record_ptr(name, ttl, tokens)
+    when "MX";     return make_record_mx(name, ttl, tokens)
+    when "TXT";    return make_record_txt(name, ttl, tokens)
+    when "AAAA";   return make_record_aaaa(name, ttl, tokens)
+    end
+  end
+
+  def make_record_a(name, ttl, tokens)
+    ipaddr = tokens.shift
+    RecordA.new(name, ipaddr, ttl)
+  end
+
+  def make_record_ns(name, ttl, tokens)
+    ns = tokens.shift
+    RecordNS.new(name, fqdn(ns), ttl)
+  end
+
+  def make_record_cname(name, ttl, tokens)
+    cname = tokens.shift
+    RecordCNAME.new(name, fqdn(cname), ttl)
+  end
+
+  def make_record_soa(name, ttl, tokens)
+    mname = fqdn(tokens.shift)
+    rname = fqdn(tokens.shift)
+    serial = tokens.shift.to_i
+    refresh = parse_ttl(tokens.shift)
+    tretry = parse_ttl(tokens.shift)
+    expire = parse_ttl(tokens.shift)
+    minimum = parse_ttl(tokens.shift)
+    RecordSOA.new(name, mname, rname, serial, refresh, tretry, expire, minimum, ttl) 
+  end
+
+  def make_record_ptr(name, ttl, tokens)
+    rname = tokens.shift
+    RecordPTR2.new(name, fqdn(rname), ttl)
+  end
+
+  def make_record_mx(name, ttl, tokens)
+    pref = tokens.shift.to_i
+    ename = tokens.shift
+    RecordMX.new(name, pref, fqdn(ename), ttl)
+  end
+
+  def make_record_mx(name, ttl, tokens)
+    pref = tokens.shift.to_i
+    ename = tokens.shift
+    RecordMX.new(name, pref, fqdn(ename), ttl)
+  end
+
+  def make_record_txt(name, ttl, tokens)
+    txt = tokens.shift
+    RecordTXT.new(name, txt, ttl)
+  end
+
+  def make_record_aaaa(name, ttl, tokens)
+    ipaddr6 = tokens.shift
+    RecordAAAA.new(name, ipaddr6, ttl)
+  end
+
+  def fqdn(name)
+    if name == '@'
+      return @origin
+    end
+    if name !~ /\.$/
+      return "#{name}.#{@origin}"
+    end
+    name.gsub(/(.*)\.$/, '\1')
+  end
+end
+
+$options = {}
+$banner = "usage: #{File.basename($0)} [srcfile] [dstfile]\n"
+
+def usage
+  puts $banner
+  abort
+end
+
+ARGV.options do |opt|
+  opt.banner = $banner
+  opt.on('-d', 'debug')                 {|v| $options[:debug] = v }
+  opt.on('-t', 'tiny-style zone file')  {|v| $options[:tinyzone] = v }
+  opt.parse!
+end
+
+src = ARGV.shift
+dst = ARGV.shift
+
+usage if src == nil || dst == nil
+usage if !File.exist?(src)
+
+if $options[:tinyzone]
+  converter = TinyZone.new
+else
+  converter = BindZone.new
+end
+
+converter.makedb(dst, src)

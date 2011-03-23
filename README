@@ -1,0 +1,270 @@
+primdns - A Simple DNS Contents Server Software
+
+* 特徴
+
+  - シンプルな DNS コンテンツサーバです。
+  - ロックフリー化されたデータ構造とマルチスレッド処理により、
+    複数の CPU コアを搭載したハードウェアにおいて高い性能を発揮します。
+  - リソースの検索に用いる DB エンジンがモジュール化されており、
+    ゾーンごとに使用するエンジンを任意に設定できるほか、複数のエンジンを
+    組み合わせて使用することもできます。
+  - DB エンジン検索結果のキャッシュ機構を備えており、低速な DB を参照する
+    場合であっても実用的な性能を発揮することができます。
+  - BIND 等の設定に用いられる標準的なゾーンファイルをそのまま利用できます。
+    また、djbdns (tinydns) 形式のデータファイルも利用できます。
+
+* 動作環境
+
+  BSD 系の OS、または Linux で利用することができます。
+  以下の環境での動作を確認しています。
+
+  - FreeBSD 8.2-RELEASE
+  - Linux 2.6.35 (Ubuntu 10.10)
+  - Mac OS X 10.5.8
+
+  その他に、関連ツールの実行に Ruby が必要です。
+
+* インストール
+
+  基本的には configure して make install すればインストールできるように
+  なっています。例えば次のようにして configure を実行してください。
+
+    $ ./configure --prefix=/usr/local/primd
+
+  この例では /usr/local/primd 以下のディレクトリがインストール先となります。
+
+  次に、
+
+    $ make install
+
+  を実行すると、必要なバイナリのコンパイルとインストールが行われます。
+  "Permission denied" 等といったエラーが表示される場合は、インストール先の
+  ディレクトリへの書き込み権限を確認してください。
+
+  なお、付属のツールの実行に Ruby が必要となりますので、ご利用の環境に
+  未だ Ruby がインストールされていない場合には、別途 Ruby のインストールが
+  必要です。
+
+* インストール (Debian)
+
+  Debian パッケージをビルドするためのルールファイルを用意していますので、
+  debuild -uc -us -b 等としてパッケージを作成することができます。
+
+  .deb パッケージが作成されたら、dpkg コマンドでインストールします。
+
+* とりあえず実行してみる
+
+  付属のサンプル設定で最低限の動作を確認するまでの手順を次に示します。
+  --prefix=/usr/local/primd として make install した場合の例となっています。
+
+  (1) インストール先に PATH を通す
+
+    標準でないディレクトリにインストールした場合には、インストール先の
+    ディレクトリに PATH を通します。
+
+      $ export PATH=$PATH:/usr/local/primd/sbin
+
+  (2) primdns-updatezone コマンドを実行
+
+    primdns はテキストで記載されたゾーン設定ファイルを事前に専用の
+    バイナリ形式にコンパイルする方式を採用しています。これは以下の
+    コマンドを実行することにより行うことができます。
+
+      $ /usr/local/primd/sbin/primdns-updatezone
+
+  (3) primd の実行
+
+    primdns の本体である primd を実行します。
+    ここでは -f オプションを指定してフォアグラウンドで実行します。
+
+      $ /usr/local/primd/sbin/primd -f
+
+  (4) DNS 問い合わせをしてみる  
+
+    dig 等のツールを使ってローカルホスト状の primd に問い合わせを
+    行います。無事応答が返ってくれば成功です。
+  
+      $ dig @127.0.0.1 localhost
+
+* 起動オプション
+
+usage: primd [options..]
+options:  -b [addr]    listen on addr
+          -c [path]    config file path
+          -d           enable debug log
+          -f           foreground mode
+          -g [group]   setgid
+          -p [port]    listen on port
+          -q           enable query log
+          -u [user]    setuid
+          -v           show version
+          -M [size]    cache pool size in MB
+          -T [num]     number of worker threads
+
+  -b    サーバが問い合わせを受信するアドレスを指定します。
+        未指定時は全てのアドレスで受信します。
+  -c    設定ファイルのパスを指定します。
+        未指定時は /etc/primd/primd.conf となります。
+  -d    デバッグ用ログを出力します。通常は指定する必要ありません
+  -f    デーモンではなく、フォアグラウンドプロセスとして動作します。
+  -g    指定されたグループ名で setgid(2) します。
+  -p    指定されたポート番号で問い合わせを受信します。
+  -q    問い合わせ内容をログに出力します。
+  -u    指定されたユーザ名で setuid(2) します。
+  -v    バージョン番号を表示します
+  -M    キャッシュ用に確保するメモリサイズを MB 単位で指定します。
+        デフォルトは 1MB です。
+  -T    生成する DB 検索用ワーカスレッドの数を指定します。
+        デフォルトは 0 で、メインのスレッドで DB 検索を行います。
+
+* 設定ファイル書式
+
+  zone <DOMAIN_NAME> {
+      search {
+          <ENGINE_NAME> <PARAMETER> ;
+        [ <ENGINE_NAME> <PARAMETER> ; ]
+        [ <ENGINE_NAME> <PARAMETER> ; ]
+        [ ... ]
+      };
+  };
+ 
+  ゾーンごとにリソース検索に用いるエンジンと、データファイル名等の
+  パラメータを設定します。複数のエンジンが設定されている場合には、
+  問い合わせのリソースが見つかるまで先頭から順にデータベースを検索
+  していきます。
+
+  <ENGINE_NAME> に指定できるものには以下のものがあります。
+
+  (1) data エンジン
+
+    データファイルを参照するエンジンです。データファイルは独自形式の
+    バイナリファイルです。これはテキストで記述されたゾーンファイルを
+    付属のツールにより変換することで得ることができます。
+
+    パラメータとしてファイル名を記述します。
+
+    [設定例]
+    zone "localhost" {
+      search {
+        data "/etc/primd/localhost.dat";
+      };
+    };
+
+    zone "0.0.127.in-addr.arpa" {
+      search {
+        data "/etc/primd/0.0.127.in-addr.arpa.dat";
+      };
+    };
+
+  (2) external エンジン
+
+    指定された外部コマンドを実行し、その結果を DNS 問い合わせ結果とします。
+    パラメータとして実行ファイル名を記述します。
+
+    [設定例]
+    domain "example.com" {
+      search {
+        external("/usr/local/libexec/extcmd.sh");
+      };
+    };
+
+    問い合わせ内容は、外部コマンド実行時の引数として渡されます。
+
+      argv[0]: コマンド名
+      argv[1]: 問い合わせドメイン名
+      argv[2]: 問い合わせクラス名
+      argv[3]: 問い合わせタイプ名
+
+    外部コマンドは、次の形式で結果を返さなくてはなりません。
+
+      1行目: DNS リザルトコード (NOERROR=0, NXDOMAIN=3, RFC2136 参照)
+      2行目: "<ドメイン名> <TTL> <クラス> <タイプ> <データ>" の形式
+      3行目以降: レコードが複数続く場合は 2 行目と同形式で続ける
+
+    外部コマンドが返却したデータは、最大で TTL 時間キャッシュされます。
+    キャッシュ上にデータが存在する場合は外部コマンドが実行されません。
+
+    なお、現在のところ、クラスは "IN" のみ、タイプは "A" および "PTR"
+    のみのサポートなっています。
+
+  (3) forward エンジン
+
+    指定された別の DNS サーバに問い合わせを転送します。
+
+    [設定例]
+    domain "example.net" {
+      search {
+        forward 192.0.2.1;
+      };
+    };
+
+* 複数エンジンの利用
+
+  ゾーン設定の search セクションにおいて複数のエンジンが設定されている
+  場合には、先頭に記述されたものから順に問い合わせを行い、最初に発見
+  された結果を採用し、クライアントに返します。
+
+  次の例では、まず最初にデータファイルの検索を行い、問い合わせのリソース
+  が見つからない場合は、別のサーバに問い合わせを転送します。
+
+  [設定例]
+  domain "example.org" {
+    search {
+      data "/etc/primd/example.org.data";
+      forward 192.0.2.2;
+    }
+  }
+
+  また次の例では、データファイルが複数のファイルに分割されています。
+
+  [設定例]
+  domain "example.net" {
+    search {
+      data "/etc/primd/example.net.dat.1";
+      data "/etc/primd/example.net.dat.2";
+    }
+  }
+
+* TODO
+
+  いまどき IPv6 トランスポートと DNSSEC をサポートしないのは恥ずかしいので
+  早急に対応する必要があると思っています。
+
+* ライセンス
+
+  Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+  1. Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+  2. Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in
+     the documentation and/or other materials provided with the
+     distribution.
+  3. The names of its contributors may not be used to endorse or
+     promote products derived from this software without specific
+     prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+* 謝辞
+
+  本ソフトウェアの実装にあたり、お世話になった皆様に感謝いたします。
+
+  Arc4 random number generator for OpenBSD.
+  Copyright 1996 David Mazieres <dm@lcs.mit.edu>.
+
+  thanks to: GREE, Inc.

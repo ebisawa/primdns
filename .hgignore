@@ -1,0 +1,4 @@
+syntax: glob
+*.o
+*~
+primd/primd

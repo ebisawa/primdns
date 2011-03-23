@@ -1,0 +1,15 @@
+$ORIGIN	localhost.
+$TTL	1800
+
+@	IN	SOA	ns.example.com. hostmaster.example.com. (
+				2011030101	; Serial
+				1H		; Refresh
+				5M		; Retry
+				1W		; Expire
+				1H		; Minimum
+			)
+
+	IN	NS	localhost.
+
+	IN	A	127.0.0.1
+	IN	AAAA	::1

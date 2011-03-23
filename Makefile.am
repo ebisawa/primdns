@@ -1,0 +1,1 @@
+SUBDIRS = primd scripts etc

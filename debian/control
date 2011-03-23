@@ -1,0 +1,11 @@
+Source: primdns
+Section: net
+Priority: extra
+Maintainer: Satoshi Ebisawa <ebisawa@gmail.com>
+Build-Depends: debhelper (>= 7)
+Standards-Version: 3.7.3
+
+Package: primdns
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ruby
+Description: DNS contents server
