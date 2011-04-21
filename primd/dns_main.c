@@ -82,8 +82,6 @@ main(int argc, char *argv[])
 
     if (dns_config_update(Options.opt_config) < 0)
         return EXIT_FAILURE;
-    if (main_init() < 0)
-        return EXIT_FAILURE;
 
     if (!Options.opt_foreground) {
         plog_setflag(DNS_LOG_FLAG_SYSLOG);
@@ -92,6 +90,9 @@ main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
     }
+
+    if (main_init() < 0)
+        return EXIT_FAILURE;
 
     if (main_make_pidfile() < 0)
         return EXIT_FAILURE;
