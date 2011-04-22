@@ -156,7 +156,9 @@ class DataFile
     value = 2166136261
     dname = name.downcase
     dname.size.times do |i|
-      value ^= dname[i]
+      code = dname[i]
+      code = code.ord if RUBY_VERSION >= '1.9.0'
+      value ^= code
       value *= 16777619
       value &= 0xffffffff
     end
