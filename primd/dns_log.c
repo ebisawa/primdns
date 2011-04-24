@@ -138,7 +138,7 @@ plog_query(int level, dns_msg_question_t *q, struct sockaddr *from, char sockcha
 
     if (LogFlags & DNS_LOG_FLAG_QUERY) {
         dns_util_sa2str(buf, sizeof(buf), from);
-        plog(level, "query from %s %c: \"%s\" %s %s",
+        plog(level, "query from %s [%c]: \"%s\" %s %s",
              buf, sockchar, q->mq_name,
              dns_proto_class_string(q->mq_class),
              dns_proto_type_string(q->mq_type));
