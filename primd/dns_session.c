@@ -305,8 +305,6 @@ session_proc(dns_session_t *session, int nonblock)
     else
         sbuf = dns_babq_pop(&InQueue);
 
-        plog(LOG_DEBUG, "%s: pop sbuf = %p", __func__, sbuf);
-
     if (sbuf != NULL) {
         session_request_proc(session, sbuf);
         session_destroy(session, sbuf);
