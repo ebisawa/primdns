@@ -286,7 +286,7 @@ dns_config_find_zone(char *name, int class)
 
     zone = (dns_config_zone_t *) dns_list_head(&root->r_zone);
     while (zone != NULL) {
-        if (zone->z_class == class) {
+        if (zone->z_class == class || class == DNS_CLASS_ANY) {
             len = strlen(zone->z_name);
             if (buflen >= len) {
                 if (strcmp(&buf[buflen - len], zone->z_name) == 0) {

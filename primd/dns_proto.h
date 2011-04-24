@@ -83,7 +83,7 @@ typedef struct {
 #define DNS_TYPE_TXT               16
 #define DNS_TYPE_AAAA              28   /* RFC1886 */
 #define DNS_TYPE_AXFR             252
-#define DNS_TYPE_ALL              255
+#define DNS_TYPE_ANY              255
 
 #define DNS_CLASS_IN                1
 #define DNS_CLASS_ANY             255

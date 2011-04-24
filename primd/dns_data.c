@@ -238,13 +238,19 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
             if (data_record_compare_name(p, conf, q->mq_name) != 0)
                 break;
 
+            /* compare class and type */
             rc = ntohs(p->dr_class);
             rt = ntohs(p->dr_type);
 
-            if (rc != q->mq_class)
-                continue;
-            if (rt != q->mq_type && rt != DNS_TYPE_CNAME)
-                continue;
+            if (rc != q->mq_class) {
+                if (rc != DNS_CLASS_ANY && q->mq_class != DNS_CLASS_ANY)
+                    continue;
+            }
+
+            if (rt != q->mq_type && rt != DNS_TYPE_CNAME) {
+                if (rt != DNS_TYPE_ANY && q->mq_type != DNS_TYPE_ANY)
+                    continue;
+            }
 
             if (data_record2res(&res, conf, p) < 0) {
                 plog(LOG_ERR, "%s: resource data convert error", MODULE);

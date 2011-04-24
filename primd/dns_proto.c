@@ -49,7 +49,7 @@ static dns_codes_t TypeString[] = {
     {  DNS_TYPE_TXT,   "TXT"   },
     {  DNS_TYPE_AAAA,  "AAAA"  },
     {  DNS_TYPE_AXFR,  "AXFR"  },
-    {  DNS_TYPE_ALL,   "ALL"   },
+    {  DNS_TYPE_ANY,   "ANY"   },
 };
 
 static dns_codes_t ClassString[] = {
