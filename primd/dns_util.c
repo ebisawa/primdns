@@ -201,7 +201,7 @@ dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa)
     char host[256];
 
     if (getnameinfo(sa, SALEN(sa), host, sizeof(host), NULL, 0, NI_NUMERICHOST) != 0) {
-        plog_error(LOG_ERR, MODULE, "getaddrinfo() failed");
+        plog_error(LOG_ERR, MODULE, "getnameinfo() failed");
         return -1;
     }
 
