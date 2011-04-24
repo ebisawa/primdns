@@ -145,7 +145,7 @@ forward_socket(struct sockaddr *to, dns_tls_t *tls)
         r = xarc4random(&tls->tls_arctx);
         port = FORWARD_PORT_MIN + (r & 0xf000);
 
-        if ((s = dns_util_socket(SOCK_DGRAM, port)) > 0) {
+        if ((s = dns_util_socket(PF_INET, SOCK_DGRAM, port)) > 0) {
             plog(LOG_DEBUG, "%s: src port = %u", __func__, port);
             return s;
         }

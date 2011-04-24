@@ -93,7 +93,6 @@ main(int argc, char *argv[])
 
     if (main_init() < 0)
         return EXIT_FAILURE;
-
     if (main_make_pidfile() < 0)
         return EXIT_FAILURE;
     if (dns_util_setugid(Options.opt_user, Options.opt_group) < 0)
@@ -162,19 +161,27 @@ main_arginit(char *argv0)
         main_findconf("");
 
     Options.opt_config = ConfPath;
+    Options.opt_ipv4_enable = 1;
+    Options.opt_ipv6_enable = 1;
     Options.opt_cache_size = DNS_DEFAULT_CACHE_SIZE;
     Options.opt_threads = DNS_DEFAULT_WORKER_THREADS;
-    dns_util_str2sa((SA *) &Options.opt_baddr, "0.0.0.0", 0);
+    Options.opt_port = DNS_PORT;
 }
 
 static void
 main_args(int argc, char *argv[])
 {
-    int i, port = DNS_PORT;
+    int i;
 
     for (i = 1; i < argc; i++) {
         if (*argv[i] == '-') {
             switch (*++argv[i]) {
+            case '4':
+                Options.opt_ipv6_enable = 0;
+                break;
+            case '6':
+                Options.opt_ipv4_enable = 0;
+                break;
             case 'b':
                 if (argv[++i] == NULL) {
                     fprintf(stderr, "error: missing address\n");
@@ -220,7 +227,7 @@ main_args(int argc, char *argv[])
                     fprintf(stderr, "error: missing port number\n");
                     exit(EXIT_FAILURE);
                 }
-                port = atoi(argv[i]);
+                Options.opt_port = atoi(argv[i]);
                 break;
             case 'q':
                 plog_setflag(DNS_LOG_FLAG_QUERY);
@@ -273,15 +280,15 @@ main_args(int argc, char *argv[])
             }
         }
     }
-
-    dns_util_sasetport((SA *) &Options.opt_baddr, port);
 }
 
 static void
 main_usage(void)
 {
     puts("usage: primd [options..]");
-    puts("options:  -b [addr]    listen on addr");
+    puts("options:  -4           ipv4 only");
+    puts("          -6           ipv6 only");
+    puts("          -b [addr]    listen on addr");
     puts("          -c [path]    config file path");
     puts("          -d           enable debug log");
     puts("          -f           foreground mode");

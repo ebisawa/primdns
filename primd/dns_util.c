@@ -49,8 +49,8 @@
 
 #define MODULE "util"
 
-static int util_sin_compare(struct sockaddr_in *a, struct sockaddr_in *b);
-static int util_sin6_compare(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
+static int util_compare_sin(struct sockaddr_in *a, struct sockaddr_in *b);
+static int util_compare_sin6(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
 
 void
 dns_util_strlcpy(char *dst, char *src, int max)
@@ -82,6 +82,28 @@ dns_util_sigmaskall(void)
 
     sigfillset(&mask);
     pthread_sigmask(SIG_BLOCK, &mask, NULL);
+}
+
+void
+dns_util_sainit(struct sockaddr *sa, int af)
+{
+    struct sockaddr_in *sin;
+    struct sockaddr_in6 *sin6;
+
+    /* XXX on FreeBSD, bind(2) seems not to require that sa_len is set correctly. but... */
+    switch (af) {
+    case AF_INET:
+        sin = (struct sockaddr_in *) sa;
+        memset(sin, 0, sizeof(*sin));
+        sin->sin_family = AF_INET;
+        break;
+
+    case AF_INET6:
+        sin6 = (struct sockaddr_in6 *) sa;
+        memset(sin6, 0, sizeof(*sin6));
+        sin6->sin6_family = AF_INET6;
+        break;
+    }
 }
 
 void
@@ -137,14 +159,14 @@ dns_util_sagetport(struct sockaddr *sa)
 }
 
 int
-dns_util_sacompare(struct sockaddr *a, struct sockaddr *b)
+dns_util_sacmp(struct sockaddr *a, struct sockaddr *b)
 {
     switch (a->sa_family) {
     case AF_INET:
-        return util_sin_compare((struct sockaddr_in *) a, (struct sockaddr_in *) b);
+        return util_compare_sin((struct sockaddr_in *) a, (struct sockaddr_in *) b);
 
     case AF_INET6:
-        return util_sin6_compare((struct sockaddr_in6 *) a, (struct sockaddr_in6 *) b);
+        return util_compare_sin6((struct sockaddr_in6 *) a, (struct sockaddr_in6 *) b);
     }
 
     return -1;
@@ -160,7 +182,7 @@ dns_util_str2sa(struct sockaddr *sa, char *addr, uint16_t port)
     hints.ai_socktype = SOCK_STREAM;
 
     if (getaddrinfo(addr, NULL, &hints, &res) != 0) {
-        plog_error(LOG_ERR, MODULE, "getaddrinfo() failed");
+        plog(LOG_ERR, "%s: getaddrinfo() failed", MODULE);
         return -1;
     }
 
@@ -175,34 +197,57 @@ dns_util_str2sa(struct sockaddr *sa, char *addr, uint16_t port)
 int
 dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa)
 {
-    return getnameinfo(sa, SALEN(sa), buf, bufmax, NULL, 0, NI_NUMERICHOST);
+    int port;
+    char host[256];
+
+    if (getnameinfo(sa, SALEN(sa), host, sizeof(host), NULL, 0, NI_NUMERICHOST) != 0) {
+        plog_error(LOG_ERR, MODULE, "getaddrinfo() failed");
+        return -1;
+    }
+
+    if ((port = dns_util_sagetport(sa)) == 0)
+        STRLCPY(buf, host, bufmax);
+    else {
+        if (sa->sa_family == AF_INET)
+            snprintf(buf, bufmax, "%s:%d", host, port);
+        if (sa->sa_family == AF_INET6)
+            snprintf(buf, bufmax, "[%s]:%d", host, port);
+    }
+
+    return 0;
 }
 
 int
-dns_util_socket(int type, int port)
+dns_util_socket(int pf, int type, int port)
 {
-    struct sockaddr_in sin;
+    struct sockaddr_storage ss;
 
-    memset(&sin, 0, sizeof(sin));
-    sin.sin_family = AF_INET;
-    dns_util_sasetport((SA *) &sin, port);
+    dns_util_sainit((SA *) &ss, pf);
+    dns_util_sasetport((SA *) &ss, port);
 
-    return dns_util_socksa(type, (SA *) &sin);
+    return dns_util_socket_sa(pf, type, (SA *) &ss);
 }
 
 int
-dns_util_socksa(int type, struct sockaddr *sa)
+dns_util_socket_sa(int pf, int type, struct sockaddr *sa)
 {
     int s, on = 1;
 
-    if ((s = socket(PF_INET, type, 0)) < 0) {
+    if ((s = socket(pf, type, 0)) < 0) {
         plog_error(LOG_ERR, MODULE, "socket() failed");
         return -1;
     }
 
+    if (pf == PF_INET6) {
+        if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) < 0) {
+            plog_error(LOG_ERR, MODULE, "setsockopt(IPV6_V6ONLY) failed");
+            return -1;
+        }
+    }
+
     if (type == SOCK_STREAM) {
         if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
-            plog_error(LOG_ERR, MODULE, "setsockopt() failed");
+            plog_error(LOG_ERR, MODULE, "setsockopt(SO_REUSEADDR) failed");
             return -1;
         }
     }
@@ -345,30 +390,26 @@ dns_util_euler_primish(unsigned n)
 }
 
 static int
-util_sin_compare(struct sockaddr_in *a, struct sockaddr_in *b)
+util_compare_sin(struct sockaddr_in *a, struct sockaddr_in *b)
 {
     int r;
 
-    if ((r = a->sin_family - b->sin_family) != 0)
+    if ((r = memcmp(&a->sin_addr, &b->sin_addr, sizeof(a->sin_addr))) != 0)
         return r;
     if ((r = a->sin_port - b->sin_port) != 0)
-        return r;
-    if ((r = memcmp(&a->sin_addr, &b->sin_addr, sizeof(a->sin_addr))) != 0)
         return r;
 
     return 0;
 }
 
 static int
-util_sin6_compare(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
+util_compare_sin6(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 {
     int r;
 
-    if ((r = a->sin6_family - b->sin6_family) != 0)
+    if ((r = memcmp(&a->sin6_addr, &b->sin6_addr, sizeof(a->sin6_addr))) != 0)
         return r;
     if ((r = a->sin6_port - b->sin6_port) != 0)
-        return r;
-    if ((r = memcmp(&a->sin6_addr, &b->sin6_addr, sizeof(a->sin6_addr))) != 0)
         return r;
 
     return 0;

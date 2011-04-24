@@ -253,6 +253,7 @@ session_request_multi(dns_sock_t *sock, int thread_id)
 
     if ((sbuf = dns_pool_get(&SessionBufPool)) == NULL) {
         plog(LOG_CRIT, "%s: bufpool empty!!", __func__);
+        return -1;
     }
 
     if (session_request_recv(sbuf, sock) < 0) {

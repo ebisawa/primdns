@@ -39,6 +39,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <pthread.h>
 #include "dns.h"
 #include "dns_session.h"
@@ -58,15 +59,17 @@ int dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swai
 
 static void *sock_thread_routine(void *param);
 static int sock_proc(dns_sock_event_t *sev, int thread_id);
+static int sock_listen(int type);
+static int sock_listen2(int type, struct sockaddr *sa);
 static int sock_nonblock(dns_sock_t *sock);
 static dns_sock_t *sock_get(void);
 static void sock_activate(dns_sock_event_t *sev, dns_sock_t *sock);
 static void sock_free(dns_sock_t *sock);
-static int sock_udp_init(void);
-static int sock_tcp_init(void);
+static int sock_udp_init(struct sockaddr *baddr);
 static int sock_udp_select(dns_sock_t *sock, int thread_id);
 static int sock_udp_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock);
 static int sock_udp_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len);
+static int sock_tcp_init(struct sockaddr *baddr);
 static int sock_tcp_select(dns_sock_t *sock, int thread_id);
 static int sock_tcp_child_init(dns_sock_t *sock, int child_fd);
 static int sock_tcp_child_select(dns_sock_t *sock, int thread_id);
@@ -77,7 +80,7 @@ static void sock_tcp_child_release(dns_sock_t *sock);
 static int sock_set_refflag(dns_sock_t *sock, unsigned flag);
 
 static pthread_t SockThreads[DNS_SOCK_THREADS];
-static dns_sock_t SockPool[DNS_SOCK_TCP_MAX];
+static dns_sock_t SockPool[DNS_SOCK_TCP_MAX + 4];
 static dns_sock_event_t SockEventUdp, SockEventTcp;
 
 #define SOCK_IS_TCP_CHILD(sock)   ((sock)->sock_prop->sp_char == 'c')
@@ -105,10 +108,19 @@ dns_sock_init(void)
     if (dns_sock_event_init(&SockEventTcp) < 0)
         return -1;
 
-    if (sock_udp_init() < 0)
-        return -1;
-    if (sock_tcp_init() < 0)
-        return -1;
+    if (Options.opt_baddr.ss_family == 0) {
+        if (sock_listen(SOCK_DGRAM) < 0)
+            return -1;
+        if (sock_listen(SOCK_STREAM) < 0)
+            return -1;
+    } else {
+        dns_util_sasetport((SA *) &Options.opt_baddr, Options.opt_port);
+
+        if (sock_listen2(SOCK_DGRAM, (SA *) &Options.opt_baddr) < 0)
+            return -1;
+        if (sock_listen2(SOCK_STREAM, (SA *) &Options.opt_baddr) < 0)
+            return -1;
+    }
 
     return 0;
 }
@@ -235,6 +247,64 @@ sock_proc(dns_sock_event_t *sev, int thread_id)
 }
 
 static int
+sock_listen(int type)
+{
+    char ports[8];
+    struct addrinfo hints, *res, *res0;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = type;
+    hints.ai_flags = AI_PASSIVE;
+    snprintf(ports, sizeof(ports), "%u", Options.opt_port);
+
+    if (getaddrinfo(NULL, ports, &hints, &res0)) {
+        plog(LOG_ERR, "%s: getaddrinfo() failed", MODULE);
+        return -1;
+    }
+
+    for (res = res0; res != NULL; res = res->ai_next) {
+        if (sock_listen2(res->ai_socktype, res->ai_addr) < 0) {
+            freeaddrinfo(res0);
+            return -1;
+        }
+    }
+
+    freeaddrinfo(res0);
+    return 0;
+}
+
+static int
+sock_listen2(int type, struct sockaddr *sa)
+{
+    char buf[256];
+
+    if (sa->sa_family == AF_INET && !Options.opt_ipv4_enable)
+        return 0;
+    if (sa->sa_family == AF_INET6 && !Options.opt_ipv6_enable)
+        return 0;
+
+    switch (type) {
+    case SOCK_DGRAM:
+        dns_util_sa2str(buf, sizeof(buf), sa);
+        plog(LOG_DEBUG, "%s: listen on %s udp", MODULE, buf);
+
+        if (sock_udp_init(sa) < 0)
+            return -1;
+        break;
+
+    case SOCK_STREAM:
+        dns_util_sa2str(buf, sizeof(buf), sa);
+        plog(LOG_DEBUG, "%s: listen on %s tcp", MODULE, buf);
+
+        if (sock_tcp_init(sa) < 0)
+            return -1;
+        break;
+    }
+
+    return 0;
+}
+
+static int
 sock_nonblock(dns_sock_t *sock)
 {
     int flags;
@@ -291,7 +361,7 @@ sock_free(dns_sock_t *sock)
 }
 
 static int
-sock_udp_init(void)
+sock_udp_init(struct sockaddr *baddr)
 {
     int sock_fd;
     dns_sock_t *sock;
@@ -301,8 +371,10 @@ sock_udp_init(void)
         return -1;
     }
 
-    if ((sock_fd = dns_util_socksa(SOCK_DGRAM, (SA *) &Options.opt_baddr)) < 0)
+    if ((sock_fd = dns_util_socket_sa(baddr->sa_family, SOCK_DGRAM, baddr)) < 0) {
+        sock_free(sock);
         return -1;
+    }
 
     memset(sock, 0, sizeof(*sock));
     sock->sock_fd = sock_fd;
@@ -315,43 +387,6 @@ sock_udp_init(void)
     }
 
     sock_activate(&SockEventUdp, sock);
-
-    return 0;
-}
-
-static int
-sock_tcp_init(void)
-{
-    int sock_fd;
-    dns_sock_t *sock;
-
-    if ((sock = sock_get()) == NULL) {
-        plog(LOG_CRIT, "%s: socket resource full. why?", MODULE);
-        return -1;
-    }
-
-    if ((sock_fd = dns_util_socksa(SOCK_STREAM, (SA *) &Options.opt_baddr)) < 0) {
-        sock_free(sock);
-        return -1;
-    }
-
-    memset(sock, 0, sizeof(*sock));
-    sock->sock_fd = sock_fd;
-    sock->sock_prop = &SockPropTcp;
-
-    if (listen(sock_fd, DNS_SOCK_TCP_MAX) < 0) {
-        plog_error(LOG_ERR, MODULE, "listen() failed");
-        sock_free(sock);
-        return -1;
-    }
-
-    if (sock_nonblock(sock) < 0) {
-        plog(LOG_ERR, "%s: sock_nonblock() failed", __func__);
-        sock_free(sock);
-        return -1;
-    }
-
-    sock_activate(&SockEventTcp, sock);
 
     return 0;
 }
@@ -385,6 +420,43 @@ sock_udp_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len)
     plog(LOG_DEBUG, "%s: udp send: fd = %d", MODULE, sock->sock_fd);
 
     return sendto(sock->sock_fd, buf, len, 0, to, SALEN(to));
+}
+
+static int
+sock_tcp_init(struct sockaddr *baddr)
+{
+    int sock_fd;
+    dns_sock_t *sock;
+
+    if ((sock = sock_get()) == NULL) {
+        plog(LOG_CRIT, "%s: socket resource full. why?", MODULE);
+        return -1;
+    }
+
+    if ((sock_fd = dns_util_socket_sa(baddr->sa_family, SOCK_STREAM, baddr)) < 0) {
+        sock_free(sock);
+        return -1;
+    }
+
+    memset(sock, 0, sizeof(*sock));
+    sock->sock_fd = sock_fd;
+    sock->sock_prop = &SockPropTcp;
+
+    if (listen(sock_fd, DNS_SOCK_TCP_MAX) < 0) {
+        plog_error(LOG_ERR, MODULE, "listen() failed");
+        sock_free(sock);
+        return -1;
+    }
+
+    if (sock_nonblock(sock) < 0) {
+        plog(LOG_ERR, "%s: sock_nonblock() failed", __func__);
+        sock_free(sock);
+        return -1;
+    }
+
+    sock_activate(&SockEventTcp, sock);
+
+    return 0;
 }
 
 static int

@@ -41,8 +41,10 @@
 #define NELEMS(array)            (sizeof(array) / sizeof(array[0]))
 
 #define SA                       struct sockaddr
-#define SALEN(sa)                (((struct sockaddr *) (sa))->sa_family == AF_INET) ? sizeof(struct sockaddr_in) : \
-    ((((struct sockaddr *) (sa))->sa_family == AF_INET6) ? sizeof(struct sockaddr_in6) : 0)
+#define SALEN(sa)                                                       \
+    ((((struct sockaddr *) (sa))->sa_family == AF_INET)                 \
+     ? sizeof(struct sockaddr_in)                                       \
+     : ((((struct sockaddr *) (sa))->sa_family == AF_INET6) ? sizeof(struct sockaddr_in6) : 0))
 
 #define STRLCPY(dst, src, max)   dns_util_strlcpy((dst), (src), (max))
 #define STRLCAT(dst, src, max)   dns_util_strlcat((dst), (src), (max))
@@ -52,14 +54,15 @@ void dns_util_strlcpy(char *dst, char *src, int max);
 void dns_util_strlcat(char *dst, char *src, int max);
 void dns_util_strlower(char *str);
 void dns_util_sigmaskall(void);
+void dns_util_sainit(struct sockaddr *sa, int af);
 void dns_util_sacopy(struct sockaddr *dst, struct sockaddr *src);
 void dns_util_sasetport(struct sockaddr *sa, uint16_t port);
 int dns_util_sagetport(struct sockaddr *sa);
-int dns_util_sacompare(struct sockaddr *a, struct sockaddr *b);
+int dns_util_sacmp(struct sockaddr *a, struct sockaddr *b);
 int dns_util_str2sa(struct sockaddr *sa, char *addr, uint16_t port);
 int dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa);
-int dns_util_socket(int type, int port);
-int dns_util_socksa(int type, struct sockaddr *sa);
+int dns_util_socket(int pf, int type, int port);
+int dns_util_socket_sa(int pf, int type, struct sockaddr *sa);
 int dns_util_select(int s, int timeout);
 int dns_util_sendf(int s, char *fmt, ...);
 int dns_util_getuid(char *user);

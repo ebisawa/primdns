@@ -44,14 +44,17 @@
 #define DNS_DEFAULT_WORKER_THREADS   0
 
 typedef struct {
-    unsigned                  opt_debug      : 1;
-    unsigned                  opt_foreground : 1;
+    char                     *opt_config;
+    unsigned                  opt_ipv4_enable : 1;
+    unsigned                  opt_ipv6_enable : 1;
+    unsigned                  opt_debug       : 1;
+    unsigned                  opt_foreground  : 1;
     int                       opt_cache_size;
     int                       opt_threads;
     int                       opt_user;
     int                       opt_group;
+    int                       opt_port;
     struct sockaddr_storage   opt_baddr;
-    char                     *opt_config;
 } dns_opts_t;
 
 typedef struct {
