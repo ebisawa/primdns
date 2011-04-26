@@ -674,7 +674,7 @@ cache_rrset_drain_hash(cache_hash_t *hash, dns_tls_t *tls)
     for (i = 0; i < NELEMS(hash->hash_array); i++, r++) {
         /*
          * cache freeing procedure:
-         * (1) retian2
+         * (1) retain2
          * (2) invalidate
          * (3) release
          */
