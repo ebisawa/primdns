@@ -191,6 +191,7 @@ config_read(char *filename)
         return NULL;
 
     if (dns_file_open(&context.ctx_handle, filename) < 0) {
+        plog(LOG_DEBUG, "%s: dns_file_open() failed", MODULE);
         free(root);
         return NULL;
     }
@@ -198,6 +199,7 @@ config_read(char *filename)
     config_init(root, &ConfigClassRoot);
 
     if (config_parse(root, &ConfigClassRoot, &context) < 0) {
+        plog(LOG_DEBUG, "%s: config_parse() failed", MODULE);
         dns_file_close(&context.ctx_handle);
         free(root);
         return NULL;
@@ -328,8 +330,10 @@ config_parse(void *config, config_class_t *cc, config_context_t *context)
         if (matched->item_next != NULL) {
             p = CONFIG_PTR(config, matched->item_offset);
             if (matched->item_plurality == SINGULAR) {
-                if (config_parse_section(p, matched->item_next, context) < 0)
+                if (config_parse_section(p, matched->item_next, context) < 0) {
+                    plog(LOG_DEBUG, "%s: config_parse_section() failed", MODULE);
                     return -1;
+                }
             } else {
                 if ((q = calloc(1, matched->item_next->cc_size)) == NULL) {
                     plog(LOG_ERR, "%s: insufficient memory", MODULE);
@@ -340,6 +344,7 @@ config_parse(void *config, config_class_t *cc, config_context_t *context)
                     cc->cc_init(q);
 
                 if (config_parse_section(q, matched->item_next, context) < 0) {
+                    plog(LOG_DEBUG, "%s: config_parse_section() failed", MODULE);
                     free(q);
                     return -1;
                 }
@@ -349,8 +354,10 @@ config_parse(void *config, config_class_t *cc, config_context_t *context)
         } else {
             if (config_parse_param(config, matched, tok.tok_string, context) < 0)
                 goto error;
-            if (config_get_token2(&tok, CONFIG_TOKEN_SEMICOLON, context) < 0)
+            if (config_get_token2(&tok, CONFIG_TOKEN_SEMICOLON, context) < 0) {
+                plog(LOG_DEBUG, "%s: config_get_token2() failed", MODULE);
                 return -1;
+            }
         }
     }
 
@@ -655,6 +662,8 @@ config_zone_parse_skey(dns_config_zone_t *zone, config_context_t *context)
             return -1;
         }
     }
+
+    plog(LOG_DEBUG, "%s: zone \"%s\"", MODULE, zone->z_name);
 
     return 0;
 }
