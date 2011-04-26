@@ -392,19 +392,19 @@ session_request_proc(dns_session_t *session, session_buf_t *sbuf)
 static int
 session_read_question(dns_session_t *session, session_buf_t *sbuf)
 {
-    uint16_t msgid, flags, qdcount, ancount, rrcount;
+    uint16_t msgid, flags, arcount;
     dns_header_t header;
     dns_msg_handle_t handle;
     dns_msg_question_t question;
 
     if (sbuf->sb_buflen == 0) {
         /* message not arrived in tcp */
-        return -1;
+        return -2;   /* can't send error response */
     }
 
     if (dns_msg_read_open(&handle, sbuf->sb_buf, sbuf->sb_buflen) < 0) {
         plog(LOG_NOTICE, "%s: message read failed", MODULE);
-        return -1;
+        return -2;   /* can't send error response */
     }
 
     if (dns_msg_read_header(&header, &handle) < 0) {
@@ -414,14 +414,16 @@ session_read_question(dns_session_t *session, session_buf_t *sbuf)
 
     msgid = ntohs(header.hdr_id);
     flags = ntohs(header.hdr_flags);
-    qdcount = ntohs(header.hdr_qdcount);
-    ancount = ntohs(header.hdr_ancount);
-    rrcount = ntohs(header.hdr_nscount) + ntohs(header.hdr_arcount);
     session_init(session, msgid, flags);
-    
+
+    /* error response can be sent after session is initialized */
     if (DNS_OPCODE(flags) != DNS_OP_QUERY)
         return -1;
-    if (qdcount > 1 || ancount > 1 || rrcount > 1)
+    if (ntohs(header.hdr_qdcount) > 1)
+        return -1;
+    if (header.hdr_ancount != 0 || header.hdr_nscount != 0)
+        return -1;
+    if ((arcount = ntohs(header.hdr_arcount)) > 1)
         return -1;
 
     if (dns_msg_read_question(&question, &handle) < 0)
@@ -430,7 +432,7 @@ session_read_question(dns_session_t *session, session_buf_t *sbuf)
     plog_query(LOG_INFO, &question, (SA *) &sbuf->sb_remote, sbuf->sb_sock->sock_prop->sp_char);
     memcpy(&session->sess_question, &question, sizeof(question));
 
-    if (rrcount == 1) {
+    if (arcount == 1) {
         if (session_read_edns_opt(session, sbuf, &handle) < 0)
             return -1;
     }
