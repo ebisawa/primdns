@@ -266,7 +266,7 @@ error:
     handle->mh_pos = opos;
 
     if (restype != DNS_MSG_RESTYPE_ADDITIONAL) {
-        plog(LOG_DEBUG, "%s: set trucated flag", MODULE);
+        plog(LOG_DEBUG, "%s: set truncated flag", MODULE);
         dns_msg_write_flag(handle, DNS_FLAG_TC);
     }
 
