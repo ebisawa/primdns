@@ -274,10 +274,10 @@ config_free(void *config, config_class_t *cc)
 dns_config_zone_t *
 dns_config_find_zone(char *name, int class)
 {
-    int len, buflen;
+    int len, buflen, match_len = 0;
     char buf[DNS_NAME_MAX];
     dns_config_root_t *root;
-    dns_config_zone_t *zone;
+    dns_config_zone_t *zone, *candidate = NULL;
 
     if ((root = ConfigRoot) == NULL)
         return NULL;
@@ -290,10 +290,10 @@ dns_config_find_zone(char *name, int class)
     while (zone != NULL) {
         if (zone->z_class == class || class == DNS_CLASS_ANY) {
             len = strlen(zone->z_name);
-            if (buflen >= len) {
+            if (buflen >= len && len > match_len) {
                 if (strcmp(&buf[buflen - len], zone->z_name) == 0) {
-                    plog(LOG_DEBUG, "%s: found zone \"%s\"", MODULE, zone->z_name);
-                    return zone;
+                    candidate = zone;
+                    match_len = len;
                 }
             }
         }
@@ -301,9 +301,12 @@ dns_config_find_zone(char *name, int class)
         zone = (dns_config_zone_t *) dns_list_next(&root->r_zone, &zone->z_elem);
     }
 
-    plog(LOG_DEBUG, "%s: no zone found", MODULE);
+    if (candidate == NULL)
+        plog(LOG_DEBUG, "%s: no zone found", MODULE);
+    else
+        plog(LOG_DEBUG, "%s: found zone \"%s\"", MODULE, candidate->z_name);
 
-    return NULL;
+    return candidate;
 }
 
 static int
