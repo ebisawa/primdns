@@ -109,9 +109,6 @@ redo:
     p = handle->fh_lnext;
     len = handle->fh_len;
 
-    if (len == sizeof(handle->fh_buf) - 1)
-        return -1;
-
     if (p != NULL) {
         handle->fh_line++;
 
