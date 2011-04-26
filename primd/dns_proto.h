@@ -74,6 +74,9 @@ typedef struct {
 #define DNS_RCODE_NOTAUTH           9
 #define DNS_RCODE_NOTZONE          10
 
+/* RFC2671 EDNS Extended RCODE */
+#define DNS_XRCODE_BADVERS          1   /* 16 */
+
 #define DNS_TYPE_A                  1
 #define DNS_TYPE_NS                 2
 #define DNS_TYPE_CNAME              5
@@ -82,6 +85,7 @@ typedef struct {
 #define DNS_TYPE_MX                15
 #define DNS_TYPE_TXT               16
 #define DNS_TYPE_AAAA              28   /* RFC1886 */
+#define DNS_TYPE_OPT               41   /* RFC2671 EDNS0 */
 #define DNS_TYPE_AXFR             252
 #define DNS_TYPE_ANY              255
 

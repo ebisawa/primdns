@@ -51,7 +51,7 @@
 static void *msg_mfetch32(void *dst, void *src);
 static int msg_read16(dns_msg_handle_t *handle);
 static int msg_read32(dns_msg_handle_t *handle);
-static int msg_read_data(void *dst, int len, dns_msg_handle_t *handle);
+static int msg_read_data(void *dst, int dstmax, int len, dns_msg_handle_t *handle);
 static int msg_write16(dns_msg_handle_t *handle, uint16_t value);
 static int msg_write32(dns_msg_handle_t *handle, uint32_t value);
 static int msg_write_data(dns_msg_handle_t *handle, void *src, int len);
@@ -142,7 +142,7 @@ dns_msg_read_resource(dns_msg_resource_t *res, dns_msg_handle_t *handle)
             return 0;
     }
 
-    return msg_read_data(res->mr_data, res->mr_datalen, handle);
+    return msg_read_data(res->mr_data, sizeof(res->mr_data), res->mr_datalen, handle);
 }
 
 int
@@ -353,8 +353,13 @@ msg_read32(dns_msg_handle_t *handle)
 }
 
 static int
-msg_read_data(void *dst, int len, dns_msg_handle_t *handle)
+msg_read_data(void *dst, int dstmax, int len, dns_msg_handle_t *handle)
 {
+    if (len == 0)
+        return 0;
+    if (len > dstmax)
+        return -1;
+
     if (!VALID_POS(handle, len)) {
         plog(LOG_NOTICE, "%s: pointer validation failed (%s)", MODULE, __func__);
         return -1;

@@ -40,13 +40,21 @@
 #include "dns_sock.h"
 
 typedef struct {
-    pthread_t                 sess_thread;
-    dns_tls_t                 sess_tls;
+    /* must be initialized by session_init() */
     u_int16_t                 sess_msgid;
     u_int16_t                 sess_flags;
+    u_int16_t                 sess_edns_version;
+    u_int16_t                 sess_edns_bufsize;
+    u_int32_t                 sess_extflags;
     dns_msg_question_t        sess_question;
-    dns_config_zone_t        *sess_zone;
     void                     *sess_config;
+
+    /* may not be initialized by session_init() */
+    dns_config_zone_t        *sess_zone;
+
+    /* must not be destroyed by session_init() */
+    pthread_t                 sess_thread;
+    dns_tls_t                 sess_tls;
 } dns_session_t;
 
 int dns_session_init(void);

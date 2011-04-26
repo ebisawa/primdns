@@ -48,6 +48,7 @@ static dns_codes_t TypeString[] = {
     {  DNS_TYPE_MX,    "MX"    },
     {  DNS_TYPE_TXT,   "TXT"   },
     {  DNS_TYPE_AAAA,  "AAAA"  },
+    {  DNS_TYPE_OPT,   "OPT"   },
     {  DNS_TYPE_AXFR,  "AXFR"  },
     {  DNS_TYPE_ANY,   "ANY"   },
 };
