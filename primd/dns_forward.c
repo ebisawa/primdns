@@ -62,11 +62,13 @@ static int forward_msg_parse_resource_soa(dns_cache_rrset_t *rrset, dns_msg_hand
 static int forward_validate_header(dns_header_t *header, uint16_t expid);
 
 dns_engine_t ForwardEngine = {
-    "forward", sizeof(forward_config_t), 0,
+    "forward", sizeof(forward_config_t),
+    0,
     (dns_engine_setarg_t *) forward_setarg,
-    NULL,
-    NULL,
+    NULL,  /* init */
+    NULL,  /* destroy */
     (dns_engine_query_t *) forward_query,
+    NULL,  /* dump */
 };
 
 static int

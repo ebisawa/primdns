@@ -49,12 +49,14 @@ static dns_codes_t TypeString[] = {
     {  DNS_TYPE_TXT,   "TXT"   },
     {  DNS_TYPE_AAAA,  "AAAA"  },
     {  DNS_TYPE_OPT,   "OPT"   },
+    {  DNS_TYPE_IXFR,  "IXFR"  },
     {  DNS_TYPE_AXFR,  "AXFR"  },
-    {  DNS_TYPE_ANY,   "ANY"   },
+    {  DNS_TYPE_ALL,   "ALL"   },
 };
 
 static dns_codes_t ClassString[] = {
     {  DNS_CLASS_IN,   "IN"    },
+    {  DNS_CLASS_CH,   "CH"    },
     {  DNS_CLASS_ANY,  "ANY"   },
 };
 

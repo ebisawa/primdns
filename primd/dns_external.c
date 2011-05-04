@@ -80,9 +80,10 @@ dns_engine_t ExternalEngine = {
     "external", sizeof(external_config_t),
     DNS_FLAG_AA,
     (dns_engine_setarg_t *) external_setarg,
-    NULL,
-    NULL,
+    NULL,  /* init */
+    NULL,  /* destroy */
     (dns_engine_query_t *) external_query,
+    NULL,  /* dump */
 };
 
 void

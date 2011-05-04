@@ -90,18 +90,28 @@ typedef struct {
     unsigned        conf_hashsize;
 } data_config_t;
 
+typedef struct {
+    uint32_t        dp_hashi;
+    uint32_t        dp_datai;
+} data_pos_t;
+
 #define INVALID_PTR(conf, p)   ((void *)(p) < (void *)(conf)->conf_data || (void *)(p) >= (void *)((conf)->conf_data + (conf)->conf_datasize))
 
 static int data_setarg(data_config_t *conf, char *arg);
 static int data_init(data_config_t *conf);
 static int data_destroy(data_config_t *conf);
 static int data_query(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
+static int data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *edump);
+
+static int data_dump_checkpos(data_pos_t *dpos, data_config_t *conf);
+static int data_dump_nextpos(data_pos_t *dpos, data_config_t *conf);
 static int data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
 static int data_query_search_head(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q);
 static int data_query_bsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q);
 static int data_query_lsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q, int low);
 static int data_hashindex(char *name, int hashsize);
 static int data_record_compare_name(data_record_t *record, data_config_t *conf, char *name);
+static int data_record_compare_class_type(data_record_t *record, dns_msg_question_t *q);
 static int data_record2res(dns_msg_resource_t *res, data_config_t *conf, data_record_t *record);
 static data_record_t *data_record(data_config_t *conf, data_hash_t *hash);
 static char *data_name(data_config_t *conf, data_record_t *record);
@@ -113,10 +123,11 @@ static data_stats_t DataStats;
 dns_engine_t DataEngine = {
     "data", sizeof(data_config_t),
     DNS_FLAG_AA,
-    (dns_engine_setarg_t *)  data_setarg,
-    (dns_engine_init_t *)    data_init,
-    (dns_engine_destroy_t *) data_destroy,
-    (dns_engine_query_t *)   data_query,
+    (dns_engine_setarg_t *)    data_setarg,
+    (dns_engine_init_t *)      data_init,
+    (dns_engine_destroy_t *)   data_destroy,
+    (dns_engine_query_t *)     data_query,
+    (dns_engine_dumpnext_t *)  data_dumpnext,
 };
 
 void
@@ -213,9 +224,70 @@ data_query(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q,
 }
 
 static int
+data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *edump)
+{
+    data_hash_t *hash;
+    data_record_t *record, *p;
+    data_pos_t *dpos = (data_pos_t *) edump->ed_data;
+
+    if (sizeof(edump->ed_data) < sizeof(data_pos_t)) {
+        plog(LOG_ERR, "%s: sizeof(edump->ed_data) < sizeof(data_pos_t)", MODULE);
+        return -1;
+    }
+
+    if (data_dump_checkpos(dpos, conf) < 0) {
+        if (data_dump_nextpos(dpos, conf) < 0)
+            return -1;
+    }
+
+    hash = &conf->conf_hash[dpos->dp_hashi];
+    if ((record = data_record(conf, hash)) == NULL)
+        return -1;
+
+    p = &record[dpos->dp_datai];
+    if (data_record2res(res, conf, p) < 0)
+        return -1;
+
+    data_dump_nextpos(dpos, conf);
+
+    return 0;
+}
+
+static int
+data_dump_checkpos(data_pos_t *dpos, data_config_t *conf)
+{
+    data_hash_t *hash;
+
+    if (dpos->dp_hashi >= conf->conf_hashsize)
+        return -1;
+
+    hash = &conf->conf_hash[dpos->dp_hashi];
+    if (dpos->dp_datai >= ntohl(hash->dh_count))
+        return -1;
+
+    return 0;
+}
+
+static int
+data_dump_nextpos(data_pos_t *dpos, data_config_t *conf)
+{
+    dpos->dp_datai++;
+    while (data_dump_checkpos(dpos, conf) < 0) {
+        dpos->dp_hashi++;
+        dpos->dp_datai = 0;
+
+        if (dpos->dp_hashi >= conf->conf_hashsize)
+            return -1;
+    }
+
+    return 0;
+}
+
+
+static int
 data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls)
 {
-    int i, hashval, index, rt, rc, count = 0;
+    int i, hashval, index, count = 0;
     dns_msg_resource_t res;
     data_hash_t *hash;
     data_record_t *record, *p;
@@ -237,20 +309,8 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
             p = &record[i];
             if (data_record_compare_name(p, conf, q->mq_name) != 0)
                 break;
-
-            /* compare class and type */
-            rc = ntohs(p->dr_class);
-            rt = ntohs(p->dr_type);
-
-            if (rc != q->mq_class) {
-                if (rc != DNS_CLASS_ANY && q->mq_class != DNS_CLASS_ANY)
-                    continue;
-            }
-
-            if (rt != q->mq_type && rt != DNS_TYPE_CNAME) {
-                if (rt != DNS_TYPE_ANY && q->mq_type != DNS_TYPE_ANY)
-                    continue;
-            }
+            if (data_record_compare_class_type(p, q) != 0)
+                continue;
 
             if (data_record2res(&res, conf, p) < 0) {
                 plog(LOG_ERR, "%s: resource data convert error", MODULE);
@@ -363,6 +423,27 @@ data_record_compare_name(data_record_t *record, data_config_t *conf, char *name)
         return -1;
     if ((r = strcasecmp(r_name, name)) != 0)
         return r;
+
+    return 0;
+}
+
+static int
+data_record_compare_class_type(data_record_t *record, dns_msg_question_t *q)
+{
+    int rc, rt;
+
+    rc = ntohs(record->dr_class);
+    rt = ntohs(record->dr_type);
+
+    if (rc != q->mq_class) {
+        if (rc != DNS_CLASS_ANY && q->mq_class != DNS_CLASS_ANY)
+            return -1;
+    }
+
+    if (rt != q->mq_type && rt != DNS_TYPE_CNAME) {
+        if (rt != DNS_TYPE_ALL && q->mq_type != DNS_TYPE_ALL)
+            return -1;
+    }
 
     return 0;
 }

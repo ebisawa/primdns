@@ -580,7 +580,7 @@ config_parse_zone_engine(void *dest, char *tstring, config_context_t *context)
         return NULL;
     }
 
-    if ((econf = calloc(1, engine->eng_confsize)) == NULL) {
+    if ((econf = calloc(1, engine->eng_conflen)) == NULL) {
         plog(LOG_ERR, "%s: insufficient memory", MODULE);
         free(ze);
         return NULL;

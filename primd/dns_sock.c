@@ -524,8 +524,11 @@ sock_tcp_child_select(dns_sock_t *sock, int thread_id)
          * otherwise increment reference counter to get
          * ownership of this socket.
          */
-        if ((refs = sock->sock_refs) & SOCK_INVALID)
+        if ((refs = sock->sock_refs) & SOCK_INVALID) {
+            plog(LOG_DEBUG, "%s: XXX ignore event due to the socket is invalidated", MODULE);
             return -1;
+        }
+
         if (ATOMIC_CAS(&sock->sock_refs, refs, refs + 1))
             break;
     }

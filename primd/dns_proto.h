@@ -53,7 +53,9 @@ typedef struct {
 
 #define DNS_OP_QUERY                0
 #define DNS_OP_IQUERY               1   /* obsolete */
-#define DNS_OP_STATUS               2   /* obsolete */
+#define DNS_OP_STATUS               2
+#define DNS_OP_NOTIFY               4   /* RFC1996 */
+#define DNS_OP_UPDATE               5   /* RFC2136 */
 
 #define DNS_FLAG_QR            0x8000   /* query(0), response(1) */
 #define DNS_FLAG_AA            0x0400   /* Authoritative Answer */
@@ -86,10 +88,15 @@ typedef struct {
 #define DNS_TYPE_TXT               16
 #define DNS_TYPE_AAAA              28   /* RFC1886 */
 #define DNS_TYPE_OPT               41   /* RFC2671 EDNS0 */
+#define DNS_TYPE_IXFR             251
 #define DNS_TYPE_AXFR             252
-#define DNS_TYPE_ANY              255
+#define DNS_TYPE_ALL              255
+
+/* 128-255: Q and Meta TYPEs (RFC5395) */
+#define DNS_TYPE_QMETA(type)  ((type) >= 128 && (type) <= 255)
 
 #define DNS_CLASS_IN                1
+#define DNS_CLASS_CH                3
 #define DNS_CLASS_ANY             255
 
 char *dns_proto_type_string(int type);

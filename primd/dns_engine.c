@@ -48,6 +48,19 @@ static dns_engine_t *QueryEngines[] = {
     &DataEngine, &ExternalEngine, &ForwardEngine,
 };
 
+dns_engine_t *
+dns_engine_find(char *name)
+{
+    int i;
+
+    for (i = 0; i < NELEMS(QueryEngines); i++) {
+        if (strcmp(QueryEngines[i]->eng_name, name) == 0)
+            return QueryEngines[i];
+    }
+
+    return NULL;
+}
+
 dns_cache_rrset_t *
 dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, int need_flags, dns_tls_t *tls)
 {
@@ -81,6 +94,7 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, int need_flags,
                 noerror = 1;
             if (rcode != DNS_RCODE_NOERROR && rcode != DNS_RCODE_NXDOMAIN)
                 return rrset;
+
             if (dns_cache_count_answer(rrset) > 0)
                 return rrset;
         }
@@ -95,15 +109,41 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, int need_flags,
     return rrset;
 }
 
-dns_engine_t *
-dns_engine_find(char *name)
+int
+dns_engine_dump_open(dns_engine_dump_t *edump, dns_config_zone_t *zone)
 {
-    int i;
+    memset(edump, 0, sizeof(*edump));
+    edump->ed_zone = zone;
+    edump->ed_ze = (dns_config_zone_engine_t *) dns_list_head(&zone->z_search.zs_engine);
 
-    for (i = 0; i < NELEMS(QueryEngines); i++) {
-        if (strcmp(QueryEngines[i]->eng_name, name) == 0)
-            return QueryEngines[i];
+    return 0;
+}
+
+int
+dns_engine_dump_next(dns_msg_resource_t *res, dns_engine_dump_t *edump)
+{
+    dns_engine_t *engine;
+    dns_config_zone_engine_t *ze;
+
+retry:
+    engine = (dns_engine_t *) edump->ed_ze->ze_engine;
+    if (engine->eng_dumpnext(res, edump->ed_ze->ze_econf, edump) < 0) {
+        ze = (dns_config_zone_engine_t *) dns_list_next(&edump->ed_zone->z_search.zs_engine,
+                                                        &edump->ed_ze->ze_elem);
+        if (ze != NULL) {
+            edump->ed_ze = ze;
+            memset(edump->ed_data, 0, sizeof(edump->ed_data));
+            goto retry;
+        }
+
+        return -1;
     }
 
-    return NULL;
+    return 0;
+}
+
+void
+dns_engine_dump_close(dns_engine_dump_t *edump)
+{
+    /* nop */
 }
