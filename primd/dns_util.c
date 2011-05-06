@@ -200,10 +200,8 @@ dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa)
     int port;
     char host[256];
 
-    if (getnameinfo(sa, SALEN(sa), host, sizeof(host), NULL, 0, NI_NUMERICHOST) != 0) {
-        plog_error(LOG_ERR, MODULE, "getnameinfo() failed");
+    if (dns_util_sa2str_wop(host, sizeof(host), sa) < 0)
         return -1;
-    }
 
     if ((port = dns_util_sagetport(sa)) == 0)
         STRLCPY(buf, host, bufmax);
@@ -212,6 +210,17 @@ dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa)
             snprintf(buf, bufmax, "%s:%d", host, port);
         if (sa->sa_family == AF_INET6)
             snprintf(buf, bufmax, "[%s]:%d", host, port);
+    }
+
+    return 0;
+}
+
+int
+dns_util_sa2str_wop(char *buf, int bufmax, struct sockaddr *sa)
+{
+    if (getnameinfo(sa, SALEN(sa), buf, bufmax, NULL, 0, NI_NUMERICHOST) != 0) {
+        plog_error(LOG_ERR, MODULE, "getnameinfo() failed");
+        return -1;
     }
 
     return 0;

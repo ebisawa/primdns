@@ -101,7 +101,7 @@ dns_proto_parse_type(char *string)
     int i;
 
     for (i = 0; i < NELEMS(TypeString); i++) {
-        if (strcmp(TypeString[i].string, string) == 0)
+        if (strcasecmp(TypeString[i].string, string) == 0)
             return TypeString[i].code;
     }
     
@@ -114,7 +114,7 @@ dns_proto_parse_class(char *string)
     int i;
 
     for (i = 0; i < NELEMS(ClassString); i++) {
-        if (strcmp(ClassString[i].string, string) == 0)
+        if (strcasecmp(ClassString[i].string, string) == 0)
             return ClassString[i].code;
     }
     

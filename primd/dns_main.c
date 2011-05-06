@@ -400,7 +400,7 @@ main_sighup_handler(void)
     dns_config_update(Options.opt_config);
     dns_cache_invalidate(NULL);
 
-    plog(LOG_INFO, "configuration updated");
+    plog(LOG_INFO, "config updated");
 }
 
 static void

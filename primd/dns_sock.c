@@ -83,20 +83,20 @@ static pthread_t SockThreads[DNS_SOCK_THREADS];
 static dns_sock_t SockPool[DNS_SOCK_TCP_MAX + 4];
 static dns_sock_event_t SockEventUdp, SockEventTcp;
 
-#define SOCK_IS_TCP_CHILD(sock)   ((sock)->sock_prop->sp_char == 'c')
+#define SOCK_IS_TCP_CHILD(sock)   ((sock)->sock_prop->sp_char == DNS_SOCK_CHAR_TCP)
 
 static dns_sock_prop_t SockPropUdp = {
-    'u', DNS_UDP_MSG_MAX,
+    DNS_SOCK_CHAR_UDP, DNS_UDP_MSG_MAX,
     sock_udp_select, sock_udp_recv, sock_udp_send, NULL
 };
 
 static dns_sock_prop_t SockPropTcp = {
-    't', 0,
+    DNS_SOCK_CHAR_TCP_L, 0,
     sock_tcp_select, NULL, NULL, NULL
 };
 
 static dns_sock_prop_t SockPropTcpChild = {
-    'c', DNS_TCP_MSG_MAX,
+    DNS_SOCK_CHAR_TCP, DNS_TCP_MSG_MAX,
     sock_tcp_child_select, sock_tcp_child_recv, sock_tcp_child_send, sock_tcp_child_release
 };
 
@@ -286,7 +286,7 @@ sock_listen2(int type, struct sockaddr *sa)
     switch (type) {
     case SOCK_DGRAM:
         dns_util_sa2str(buf, sizeof(buf), sa);
-        plog(LOG_DEBUG, "%s: listen on %s udp", MODULE, buf);
+        plog(LOG_INFO, "listen on %s udp", buf);
 
         if (sock_udp_init(sa) < 0)
             return -1;
@@ -294,7 +294,7 @@ sock_listen2(int type, struct sockaddr *sa)
 
     case SOCK_STREAM:
         dns_util_sa2str(buf, sizeof(buf), sa);
-        plog(LOG_DEBUG, "%s: listen on %s tcp", MODULE, buf);
+        plog(LOG_INFO, "listen on %s tcp", buf);
 
         if (sock_tcp_init(sa) < 0)
             return -1;

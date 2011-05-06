@@ -40,6 +40,10 @@
 #define DNS_SOCK_TCP_MAX    1024
 #define DNS_SOCK_EVENT_MAX    32
 
+#define DNS_SOCK_CHAR_UDP    'u'
+#define DNS_SOCK_CHAR_TCP    't'
+#define DNS_SOCK_CHAR_TCP_L  'T'
+
 typedef struct dns_sock_event dns_sock_event_t;
 typedef struct dns_sock_prop dns_sock_prop_t;
 typedef struct dns_sock dns_sock_t;

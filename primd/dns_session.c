@@ -39,6 +39,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include "dns.h"
+#include "dns_acl.h"
 #include "dns_babq.h"
 #include "dns_cache.h"
 #include "dns_config.h"
@@ -412,21 +413,29 @@ session_request_normal(dns_session_t *session, session_buf_t *sbuf)
 static int
 session_request_axfr(dns_session_t *session, session_buf_t *sbuf)
 {
+    char buf[256];
     dns_msg_question_t *q;
     dns_msg_resource_t soa, res;
     dns_config_zone_t *zone;
     dns_engine_dump_t edump;
 
+    q = &session->sess_question;
+    zone = session->sess_zone;
+
+    /* slave? */
+    if (!dns_acl_match(&zone->z_slaves.zss_acl, (SA *) &sbuf->sb_remote)) {
+        dns_util_sa2str_wop(buf, sizeof(buf), (SA *) &sbuf->sb_remote);
+        plog(LOG_NOTICE, "%s: unauthorized AXFR request from %s", MODULE, buf);
+        return DNS_RCODE_REFUSED;
+    }
+
     /* tcp? */
-    if (sbuf->sb_sock->sock_prop->sp_char != 'c') {
+    if (sbuf->sb_sock->sock_prop->sp_char != DNS_SOCK_CHAR_TCP) {
         plog(LOG_ERR, "%s: AXFR requested but connection is not TCP", MODULE);
         return DNS_RCODE_SERVFAIL;
     }
 
     /* query name = zone name? */
-    q = &session->sess_question;
-    zone = session->sess_zone;
-
     if (strcasecmp(q->mq_name, zone->z_name) != 0) {
         plog(LOG_ERR, "%s: AXFR requested but not authoritative for the zone \"%s\"", MODULE, q->mq_name);
         return DNS_RCODE_NOTAUTH;   /* RFC5936 2.2.1. */
