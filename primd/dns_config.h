@@ -31,12 +31,17 @@
 #define __DNS_CONFIG_H__
 #include "dns.h"
 #include "dns_list.h"
+#include "dns_acl.h"
 
 typedef struct {
     dns_list_elem_t            ze_elem;
     void                      *ze_engine;
     void                      *ze_econf;
 } dns_config_zone_engine_t;
+
+typedef struct {
+    dns_acl_t                  zss_acl;
+} dns_config_zone_slaves_t;
 
 typedef struct {
     dns_list_t                 zs_engine;
@@ -47,6 +52,7 @@ typedef struct {
     char                       z_name[128];
     int                        z_class;
     dns_config_zone_search_t   z_search;
+    dns_config_zone_slaves_t   z_slaves;
 } dns_config_zone_t;
 
 typedef struct {
