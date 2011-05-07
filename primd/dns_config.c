@@ -336,7 +336,7 @@ config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_to
 {
     if (strcmp(tok->tok_string, "search") == 0)
         return config_parse_clause(&zone->z_search, ctx, NULL, (config_parse_body_t *) config_parse_zone_search_body);
-    if (strcmp(tok->tok_string, "slave-servers") == 0)
+    if (strcmp(tok->tok_string, "slaves") == 0)
         return config_parse_clause(&zone->z_slaves, ctx, NULL, (config_parse_body_t *) config_parse_zone_slaves_body);
 
     config_error_unexpected(tok, ctx);
