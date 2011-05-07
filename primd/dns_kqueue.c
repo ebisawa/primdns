@@ -60,7 +60,7 @@ dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock)
 {
     struct kevent kev;
 
-    EV_SET(&kev, sock->sock_fd, EVFILT_READ, EV_ADD, 0, 0, sock);
+    EV_SET(&kev, sock->sock_fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, sock);
     if (kevent(swait->sev_fd, &kev, 1, NULL, 0, NULL) < 0) {
         plog(LOG_DEBUG, "%s: kevent() failed", __func__);
         return -1;
@@ -88,10 +88,12 @@ dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait)
         return -1;
     }
 
-    for (i = 0; i < count; i++)
+    for (i = 0; i < count; i++) {
         socks[i] = kev[i].udata;
+        plog(LOG_DEBUG, "%s: event on fd = %d", MODULE, socks[i]->sock_fd);
+    }
 
     return count;
 }
 
-#endif
+#endif  /* HAVE_KQUEUE */

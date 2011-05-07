@@ -59,7 +59,7 @@ dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock)
     struct epoll_event event;
 
     memset(&event, 0, sizeof(event));
-    event.events  = EPOLLIN;
+    event.events  = EPOLLIN | EPOLLET;
     event.data.ptr = sock;
 
     if (epoll_ctl(swait->sev_fd, EPOLL_CTL_ADD, sock->sock_fd, &event) < 0) {
@@ -79,7 +79,6 @@ dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait)
     struct epoll_event events[DNS_SOCK_EVENT_MAX];
 
     max_wait = (sock_max < NELEMS(events)) ? sock_max : NELEMS(events);
-
     if ((count = epoll_wait(swait->sev_fd, events, max_wait, 1100)) < 0) {
         if (errno == EINTR)
             return 0;
@@ -87,9 +86,6 @@ dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait)
         plog_error(LOG_ERR, MODULE, "epoll_wait() failed");
         return -1;
     }
-
-    if (count > 0)
-        plog(LOG_DEBUG, "%s: event count = %d", MODULE, count);
 
     for (i = 0; i < count; i++) {
         socks[i] = (dns_sock_t *) events[i].data.ptr;
@@ -99,4 +95,4 @@ dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait)
     return count;
 }
 
-#endif
+#endif  /* HAVE_EPOLL */
