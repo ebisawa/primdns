@@ -48,9 +48,16 @@ typedef struct dns_sock_event dns_sock_event_t;
 typedef struct dns_sock_prop dns_sock_prop_t;
 typedef struct dns_sock dns_sock_t;
 
+typedef struct {
+    dns_sock_t               *sb_sock;
+    struct sockaddr_storage   sb_remote;
+    int                       sb_buflen;
+    char                      sb_buf[DNS_MSG_MAX];
+} dns_sock_buf_t;
+
 typedef int (dns_sock_select_func_t)(dns_sock_t *sock, int thread_id);
-typedef int (dns_sock_recv_func_t)(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock);
-typedef int (dns_sock_send_func_t)(dns_sock_t *sock, struct sockaddr *to, void *buf, int len);
+typedef int (dns_sock_recv_func_t)(dns_sock_buf_t *sbuf, dns_sock_t *sock);
+typedef int (dns_sock_send_func_t)(dns_sock_t *sock, dns_sock_buf_t *sbuf);
 typedef void (dns_sock_release_func_t)(dns_sock_t *sock);
 
 struct dns_sock_event {
@@ -77,8 +84,8 @@ struct dns_sock {
 int dns_sock_init(void);
 int dns_sock_start_thread(void);
 int dns_sock_proc(void);
-int dns_sock_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock);
-int dns_sock_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len);
+int dns_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
+int dns_sock_send(dns_sock_buf_t *sbuf);
 void dns_sock_release(dns_sock_t *sock);
 void dns_sock_invalidate(dns_sock_t *sock);
 void dns_sock_gc(void);

@@ -67,15 +67,15 @@ static void sock_activate(dns_sock_event_t *sev, dns_sock_t *sock);
 static void sock_free(dns_sock_t *sock);
 static int sock_udp_init(struct sockaddr *baddr);
 static int sock_udp_select(dns_sock_t *sock, int thread_id);
-static int sock_udp_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock);
-static int sock_udp_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len);
+static int sock_udp_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
+static int sock_udp_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
 static int sock_tcp_init(struct sockaddr *baddr);
 static int sock_tcp_select(dns_sock_t *sock, int thread_id);
 static int sock_tcp_child_init(dns_sock_t *sock, int child_fd);
 static int sock_tcp_child_select(dns_sock_t *sock, int thread_id);
-static int sock_tcp_child_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock);
+static int sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int sock_tcp_child_getmsg(void *buf, int bufmax, int sock_fd, int flags);
-static int sock_tcp_child_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len);
+static int sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
 static void sock_tcp_child_release(dns_sock_t *sock);
 static int sock_set_refflag(dns_sock_t *sock, unsigned flag);
 
@@ -145,19 +145,28 @@ dns_sock_proc(void)
 }
 
 int
-dns_sock_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock)
+dns_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 {
-    if (sock->sock_prop->sp_recv_func != NULL)
-        return sock->sock_prop->sp_recv_func(buf, bufmax, from, sock);
+    int len = 0;
 
-    return 0;
+    if (sock->sock_prop->sp_recv_func != NULL) {
+        if ((len = sock->sock_prop->sp_recv_func(sbuf, sock)) < 0)
+            return -1;
+    }
+
+    sbuf->sb_sock = sock;
+    sbuf->sb_buflen = len;
+
+    return len;
 }
 
 int
-dns_sock_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len)
+dns_sock_send(dns_sock_buf_t *sbuf)
 {
+    dns_sock_t *sock = sbuf->sb_sock;
+
     if (sock->sock_prop->sp_send_func != NULL)
-        return sock->sock_prop->sp_send_func(sock, to, buf, len);
+        return sock->sock_prop->sp_send_func(sock, sbuf);
 
     return 0;
 }
@@ -398,13 +407,14 @@ sock_udp_select(dns_sock_t *sock, int thread_id)
 }
 
 static int
-sock_udp_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock)
+sock_udp_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 {
     int len;
     socklen_t fromlen;
 
-    fromlen = sizeof(struct sockaddr_storage);
-    if ((len = recvfrom(sock->sock_fd, buf, bufmax, 0, from, &fromlen)) < 0) {
+    fromlen = sizeof(sbuf->sb_remote);
+    if ((len = recvfrom(sock->sock_fd, sbuf->sb_buf, sizeof(sbuf->sb_buf), 0,
+                        (SA *) &sbuf->sb_remote, &fromlen)) < 0) {
         if (errno != EAGAIN)
             plog_error(LOG_ERR, MODULE, "recvfrom() failed");
 
@@ -415,11 +425,12 @@ sock_udp_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock)
 }
 
 static int
-sock_udp_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len)
+sock_udp_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 {
     plog(LOG_DEBUG, "%s: udp send: fd = %d", MODULE, sock->sock_fd);
 
-    return sendto(sock->sock_fd, buf, len, 0, to, SALEN(to));
+    return sendto(sock->sock_fd, sbuf->sb_buf, sbuf->sb_buflen, 0,
+                  (SA *) &sbuf->sb_remote, SALEN(&sbuf->sb_remote));
 }
 
 static int
@@ -537,13 +548,13 @@ sock_tcp_child_select(dns_sock_t *sock, int thread_id)
 }
 
 static int
-sock_tcp_child_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *sock)
+sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 {
     int len;
     socklen_t fromlen;
 
     /* peek */
-    if ((len = sock_tcp_child_getmsg(buf, bufmax, sock->sock_fd, MSG_PEEK)) < 0)
+    if ((len = sock_tcp_child_getmsg(sbuf->sb_buf, sizeof(sbuf->sb_buf), sock->sock_fd, MSG_PEEK)) < 0)
         return -1;
 
     /* incompeleted message */
@@ -551,13 +562,13 @@ sock_tcp_child_recv(void *buf, int bufmax, struct sockaddr *from, dns_sock_t *so
         return 0;
 
     /* receive */
-    if ((len = sock_tcp_child_getmsg(buf, bufmax, sock->sock_fd, 0)) <= 0) {
+    if ((len = sock_tcp_child_getmsg(sbuf->sb_buf, sizeof(sbuf->sb_buf), sock->sock_fd, 0)) <= 0) {
         plog(LOG_ERR, "%s: sock_tcp_child_getmsg() failed", MODULE);
         return -1;
     }
 
-    fromlen = sizeof(struct sockaddr_storage);
-    if (getpeername(sock->sock_fd, (SA *) from, &fromlen) < 0) {
+    fromlen = sizeof(sbuf->sb_remote);
+    if (getpeername(sock->sock_fd, (SA *) &sbuf->sb_remote, &fromlen) < 0) {
         plog_error(LOG_ERR, MODULE, "getpeername() failed");
         return -1;
     }
@@ -591,20 +602,20 @@ sock_tcp_child_getmsg(void *buf, int bufmax, int sock_fd, int flags)
 }
 
 static int
-sock_tcp_child_send(dns_sock_t *sock, struct sockaddr *to, void *buf, int len)
+sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 {
     int slen;
     uint16_t msglen;
 
-    msglen = htons(len);
+    msglen = htons(sbuf->sb_buflen);
     slen = send(sock->sock_fd, &msglen, sizeof(msglen), 0);
     if (slen != sizeof(msglen)) {
         plog_error(LOG_ERR, MODULE, "send() failed: fd = %d", sock->sock_fd);
         return -1;
     }
 
-    slen = send(sock->sock_fd, buf, len, 0);
-    if (slen != len) {
+    slen = send(sock->sock_fd, sbuf->sb_buf, sbuf->sb_buflen, 0);
+    if (slen != sbuf->sb_buflen) {
         plog_error(LOG_ERR, MODULE, "send() failed: fd = %d", sock->sock_fd);
         return -1;
     }

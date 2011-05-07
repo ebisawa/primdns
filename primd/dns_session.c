@@ -46,6 +46,7 @@
 #include "dns_engine.h"
 #include "dns_pool.h"
 #include "dns_session.h"
+#include "dns_sock.h"
 #include "dns_util.h"
 
 #define MODULE "session"
@@ -61,13 +62,6 @@ typedef struct {
     unsigned                  stat_response;
 } session_stats_t;
 
-typedef struct {
-    dns_sock_t               *sb_sock;
-    struct sockaddr_storage   sb_remote;
-    int                       sb_buflen;
-    char                      sb_buf[DNS_MSG_MAX];
-} session_buf_t;
-
 static int NumWorkers;
 static dns_session_t *WorkerSessions;
 static dns_session_t MainSessions[DNS_SOCK_THREADS + 1];
@@ -82,30 +76,30 @@ static void *session_thread_sender(void *param);
 static int session_request_basic(dns_sock_t *sock, int thread_id);
 static int session_request_multi(dns_sock_t *sock, int thread_id);
 static void session_init(dns_session_t *sessin, uint16_t msgid, uint16_t flags);
-static void session_destroy(dns_session_t *session, session_buf_t *sbuf);
+static void session_destroy(dns_session_t *session, dns_sock_buf_t *sbuf);
 static void session_proc(dns_session_t *session, int nonblock);
-static int session_request_recv(session_buf_t *sbuf, dns_sock_t *sock);
-static int session_request_proc(dns_session_t *session, session_buf_t *sbuf);
-static int session_request_normal(dns_session_t *session, session_buf_t *sbuf);
-static int session_request_axfr(dns_session_t *session, session_buf_t *sbuf);
-static int session_read_question(dns_session_t *session, session_buf_t *sbuf);
-static int session_read_edns_opt(dns_session_t *session, session_buf_t *sbuf, dns_msg_handle_t *handle);
+static int session_request_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
+static int session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_request_normal(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, dns_msg_handle_t *handle);
 static int session_validate_question(dns_header_t *header);
-static dns_cache_rrset_t *session_query_answer(dns_session_t *session, session_buf_t *sbuf);
+static dns_cache_rrset_t *session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf);
 static dns_cache_rrset_t *session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset);
 static dns_cache_rrset_t *session_query_recursive(dns_session_t *session, dns_msg_question_t *q, int nlevel);
 static dns_cache_rrset_t *session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type);
 static dns_cache_rrset_t *session_query_internal(dns_session_t *session, dns_msg_question_t *q, int need_flags);
 static int session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type);
 static void session_resolve_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel);
-static void session_send_response(session_buf_t *sbuf);
-static void session_send_finish(session_buf_t *sbuf);
-static int session_send_immediate(session_buf_t *sbuf);
-static int session_send_axfr(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa);
-static int session_send_axfr_resource(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
-static int session_make_response(session_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset);
-static int session_make_axfr_response(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
-static int session_make_error(session_buf_t *sbuf, dns_session_t *session, int rcode);
+static void session_send_response(dns_sock_buf_t *sbuf);
+static void session_send_finish(dns_sock_buf_t *sbuf);
+static int session_send_immediate(dns_sock_buf_t *sbuf);
+static int session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa);
+static int session_send_axfr_resource(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
+static int session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset);
+static int session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
+static int session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode);
 static int session_write_header(dns_session_t *session, dns_msg_handle_t *handle, void *buf, int rcode, int flags);
 static void session_write_resources(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype);
 static void session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype);
@@ -140,7 +134,7 @@ dns_session_start_thread(int threads)
         if (dns_babq_init(&OutQueue, threads) < 0)
             return -1;
 
-        if (dns_pool_init(&SessionBufPool, sizeof(session_buf_t),
+        if (dns_pool_init(&SessionBufPool, sizeof(dns_sock_buf_t),
                           threads + threads           /* in/out queue */
                           + threads                   /* worker threads */
                           + NELEMS(MainSessions) + 1  /* sock threads */ 
@@ -224,7 +218,7 @@ session_thread_worker(dns_session_t *self)
 static void *
 session_thread_sender(void *param)
 {
-    session_buf_t *sbuf;
+    dns_sock_buf_t *sbuf;
 
     dns_util_sigmaskall();
 
@@ -240,7 +234,7 @@ session_thread_sender(void *param)
 static int
 session_request_basic(dns_sock_t *sock, int thread_id)
 {
-    session_buf_t sbuf;
+    dns_sock_buf_t sbuf;
     dns_session_t *session;
 
     if (session_request_recv(&sbuf, sock) < 0) {
@@ -259,7 +253,7 @@ session_request_basic(dns_sock_t *sock, int thread_id)
 static int
 session_request_multi(dns_sock_t *sock, int thread_id)
 {
-    session_buf_t *sbuf;
+    dns_sock_buf_t *sbuf;
     dns_session_t *session;
 
     plog(LOG_DEBUG, "%s: multiworker mode", MODULE);
@@ -308,7 +302,7 @@ session_init(dns_session_t *session, uint16_t msgid, uint16_t flags)
 }
 
 static void
-session_destroy(dns_session_t *session, session_buf_t *sbuf)
+session_destroy(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     session->sess_config = NULL;
 }
@@ -316,7 +310,7 @@ session_destroy(dns_session_t *session, session_buf_t *sbuf)
 static void
 session_proc(dns_session_t *session, int nonblock)
 {
-    session_buf_t *sbuf;
+    dns_sock_buf_t *sbuf;
 
     if (nonblock)
         sbuf = dns_babq_pop_nb(&InQueue);
@@ -330,24 +324,20 @@ session_proc(dns_session_t *session, int nonblock)
 }
 
 static int
-session_request_recv(session_buf_t *sbuf, dns_sock_t *sock)
+session_request_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 {
     int len;
 
-    if ((len = dns_sock_recv(sbuf->sb_buf, sizeof(sbuf->sb_buf),
-                             (SA *) &sbuf->sb_remote, sock)) < 0) {
+    if ((len = dns_sock_recv(sbuf, sock)) < 0) {
         /* read failed, socket closed by peer or receive incompleted */
         return -1;
     }
-
-    sbuf->sb_sock = sock;
-    sbuf->sb_buflen = len;
 
     return len;
 }
 
 static int
-session_request_proc(dns_session_t *session, session_buf_t *sbuf)
+session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     int rcode;
     dns_msg_question_t *q;
@@ -392,7 +382,7 @@ error:
 }
 
 static int
-session_request_normal(dns_session_t *session, session_buf_t *sbuf)
+session_request_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     dns_cache_rrset_t *rrset;
 
@@ -412,7 +402,7 @@ session_request_normal(dns_session_t *session, session_buf_t *sbuf)
 }
 
 static int
-session_request_axfr(dns_session_t *session, session_buf_t *sbuf)
+session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     int r;
     char from[64];
@@ -461,7 +451,7 @@ session_request_axfr(dns_session_t *session, session_buf_t *sbuf)
 }
 
 static int
-session_read_question(dns_session_t *session, session_buf_t *sbuf)
+session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     uint16_t msgid, flags, arcount;
     dns_header_t header;
@@ -507,7 +497,7 @@ session_read_question(dns_session_t *session, session_buf_t *sbuf)
 }
 
 static int
-session_read_edns_opt(dns_session_t *session, session_buf_t *sbuf, dns_msg_handle_t *handle)
+session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, dns_msg_handle_t *handle)
 {
     unsigned ver;
     dns_msg_resource_t opt;
@@ -549,7 +539,7 @@ session_validate_question(dns_header_t *header)
 }
 
 static dns_cache_rrset_t *
-session_query_answer(dns_session_t *session, session_buf_t *sbuf)
+session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     dns_msg_question_t *q;
     dns_cache_rrset_t *rrset;
@@ -683,7 +673,7 @@ session_resolve_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_r
 }
 
 static void
-session_send_response(session_buf_t *sbuf)
+session_send_response(dns_sock_buf_t *sbuf)
 {
     if (WorkerSessions != NULL) {
         if (dns_babq_push_nb(&OutQueue, sbuf) >= 0)
@@ -695,7 +685,7 @@ session_send_response(session_buf_t *sbuf)
 }
 
 static void
-session_send_finish(session_buf_t *sbuf)
+session_send_finish(dns_sock_buf_t *sbuf)
 {
     dns_sock_release(sbuf->sb_sock);
 
@@ -704,9 +694,9 @@ session_send_finish(session_buf_t *sbuf)
 }
 
 static int
-session_send_immediate(session_buf_t *sbuf)
+session_send_immediate(dns_sock_buf_t *sbuf)
 {
-    if (dns_sock_send(sbuf->sb_sock, (SA *) &sbuf->sb_remote, sbuf->sb_buf, sbuf->sb_buflen) < 0) {
+    if (dns_sock_send(sbuf) < 0) {
         plog(LOG_ERR, "%s: message send failed", MODULE);
         return -1;
     }
@@ -715,7 +705,7 @@ session_send_immediate(session_buf_t *sbuf)
 }
 
 static int
-session_send_axfr(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa)
+session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa)
 {
     dns_msg_resource_t res;
     dns_engine_dump_t edump;
@@ -743,7 +733,7 @@ session_send_axfr(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_
 }
 
 static int
-session_send_axfr_resource(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res)
+session_send_axfr_resource(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res)
 {
     if (session_make_axfr_response(sbuf, session, res) < 0)
         return -1;
@@ -754,7 +744,7 @@ session_send_axfr_resource(session_buf_t *sbuf, dns_session_t *session, dns_msg_
 }
 
 static int
-session_make_response(session_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset)
+session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset)
 {
     int rcode, flags, resmax;
     dns_msg_handle_t handle;
@@ -804,7 +794,7 @@ session_make_response(session_buf_t *sbuf, dns_session_t *session, dns_cache_rrs
 }
 
 static int
-session_make_axfr_response(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res)
+session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res)
 {
     int resmax;
     dns_msg_handle_t handle;
@@ -847,7 +837,7 @@ session_make_axfr_response(session_buf_t *sbuf, dns_session_t *session, dns_msg_
 }
 
 static int
-session_make_error(session_buf_t *sbuf, dns_session_t *session, int rcode)
+session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode)
 {
     int resmax;
     dns_msg_handle_t handle;
