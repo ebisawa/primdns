@@ -59,8 +59,9 @@ static int main_make_pidfile(void);
 static int main_loop(void);
 static void main_init_signal(void);
 static void main_signal_handler(int signum);
-static void main_sighup_handler(void);
-static void main_sigterm_handler(void);
+static void main_signal_proc(int signum, void (*proc_func)(void));
+static void main_sighup_proc(void);
+static void main_sigterm_proc(void);
 
 dns_opts_t Options;
 
@@ -72,6 +73,8 @@ static char *ConfNames[] = {
     "etc/primd/primd.conf",
     "etc/primdns/primd.conf",
 };
+
+static uint32_t SignalReceived;
 
 int
 main(int argc, char *argv[])
@@ -366,6 +369,9 @@ main_loop(void)
     for (;;) {
         dns_sock_proc();
         dns_sock_gc();
+
+        main_signal_proc(SIGHUP, main_sighup_proc);
+        main_signal_proc(SIGTERM, main_sigterm_proc);
     }
 
     return 0;
@@ -382,32 +388,43 @@ main_init_signal(void)
 static void
 main_signal_handler(int signum)
 {
+#if SIGHUP > 31 || SIGTERM > 31
+#error "XXX signal number must be less than 32"
+#endif
+
     switch (signum) {
     case SIGHUP:
-        main_sighup_handler();
-        break;
     case SIGTERM:
-        main_sigterm_handler();
+        SignalReceived |= (1 << signum);
         break;
     }
 }
 
 static void
-main_sighup_handler(void)
+main_signal_proc(int signum, void (*proc_func)(void))
 {
-    plog(LOG_INFO, "SIGHUP received. reloading...");
+    uint32_t sigflag;
 
+    sigflag = 1 << signum;
+    if (SignalReceived & sigflag) {
+        SignalReceived &= ~sigflag;
+        proc_func();
+    }
+}
+
+static void
+main_sighup_proc(void)
+{
+    plog(LOG_INFO, "SIGHUP received");
     dns_config_update(Options.opt_config);
     dns_cache_invalidate(NULL);
-
     plog(LOG_INFO, "config updated");
 }
 
 static void
-main_sigterm_handler(void)
+main_sigterm_proc(void)
 {
     plog(LOG_INFO, "SIGTERM received. shutting down...");
-
     unlink(PATH_PID);
     exit(EXIT_SUCCESS);
 }
