@@ -101,6 +101,7 @@ static void session_resolve_cname(dns_session_t *session, dns_msg_question_t *q,
 static void session_send_response(session_buf_t *sbuf);
 static void session_send_finish(session_buf_t *sbuf);
 static int session_send_immediate(session_buf_t *sbuf);
+static int session_send_axfr(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa);
 static int session_send_axfr_resource(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
 static int session_make_response(session_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset);
 static int session_make_axfr_response(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
@@ -413,19 +414,20 @@ session_request_normal(dns_session_t *session, session_buf_t *sbuf)
 static int
 session_request_axfr(dns_session_t *session, session_buf_t *sbuf)
 {
-    char buf[256];
+    int r;
+    char from[64];
+    uint32_t serial;
     dns_msg_question_t *q;
-    dns_msg_resource_t soa, res;
+    dns_msg_resource_t soa;
     dns_config_zone_t *zone;
-    dns_engine_dump_t edump;
 
     q = &session->sess_question;
     zone = session->sess_zone;
+    dns_util_sa2str_wop(from, sizeof(from), (SA *) &sbuf->sb_remote);
 
     /* slave? */
     if (!dns_acl_match(&zone->z_slaves.zss_acl, (SA *) &sbuf->sb_remote)) {
-        dns_util_sa2str_wop(buf, sizeof(buf), (SA *) &sbuf->sb_remote);
-        plog(LOG_NOTICE, "%s: unauthorized AXFR request from %s", MODULE, buf);
+        plog(LOG_NOTICE, "%s: unauthorized AXFR request from %s", MODULE, from);
         return DNS_RCODE_REFUSED;
     }
 
@@ -437,7 +439,7 @@ session_request_axfr(dns_session_t *session, session_buf_t *sbuf)
 
     /* query name = zone name? */
     if (strcasecmp(q->mq_name, zone->z_name) != 0) {
-        plog(LOG_ERR, "%s: AXFR requested but not authoritative for the zone \"%s\"", MODULE, q->mq_name);
+        plog(LOG_ERR, "%s: AXFR requested but not authoritative for zone \"%s\"", MODULE, q->mq_name);
         return DNS_RCODE_NOTAUTH;   /* RFC5936 2.2.1. */
     }
 
@@ -447,29 +449,13 @@ session_request_axfr(dns_session_t *session, session_buf_t *sbuf)
         return DNS_RCODE_SERVFAIL;
     }
 
-    /* send SOA */
-    if (session_send_axfr_resource(sbuf, session, &soa) < 0)
-        return DNS_RCODE_SERVFAIL;
+    dns_msg_parse_soa(NULL, NULL,  &serial, NULL, NULL, NULL, NULL, &soa);
+    plog(LOG_INFO, "transfer zone \"%s\" to %s: started (serial %u)", zone->z_name, from, serial);
 
-    /* transfer zone data... */
-    if (dns_engine_dump_open(&edump, session->sess_zone) < 0)
-        return DNS_RCODE_SERVFAIL;
+    if ((r = session_send_axfr(sbuf, session, &soa)) != 0)
+        return r;
 
-    while (dns_engine_dump_next(&res, &edump) >= 0) {
-        if (res.mr_q.mq_type == DNS_TYPE_SOA)
-            continue;
-        if (session_send_axfr_resource(sbuf, session, &res) < 0)
-            return DNS_RCODE_SERVFAIL;
-    }
-
-    dns_engine_dump_close(&edump);
-
-    /* send SOA */
-    if (session_send_axfr_resource(sbuf, session, &soa) < 0)
-        return DNS_RCODE_SERVFAIL;
-
-    /* session finish */
-    session_send_finish(sbuf);
+    plog(LOG_INFO, "transfer zone \"%s\" to %s: completed (serial %u)", zone->z_name, from, serial);
 
     return DNS_RCODE_NOERROR;
 }
@@ -729,6 +715,34 @@ session_send_immediate(session_buf_t *sbuf)
 }
 
 static int
+session_send_axfr(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa)
+{
+    dns_msg_resource_t res;
+    dns_engine_dump_t edump;
+
+    if (session_send_axfr_resource(sbuf, session, soa) < 0)
+        return DNS_RCODE_SERVFAIL;
+
+    if (dns_engine_dump_open(&edump, session->sess_zone) < 0)
+        return DNS_RCODE_SERVFAIL;
+
+    while (dns_engine_dump_next(&res, &edump) >= 0) {
+        if (res.mr_q.mq_type == DNS_TYPE_SOA)
+            continue;
+        if (session_send_axfr_resource(sbuf, session, &res) < 0)
+            return DNS_RCODE_SERVFAIL;
+    }
+
+    dns_engine_dump_close(&edump);
+
+    if (session_send_axfr_resource(sbuf, session, soa) < 0)
+        return DNS_RCODE_SERVFAIL;
+
+    session_send_finish(sbuf);
+    return 0;
+}
+
+static int
 session_send_axfr_resource(session_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res)
 {
     if (session_make_axfr_response(sbuf, session, res) < 0)
@@ -819,8 +833,10 @@ session_make_axfr_response(session_buf_t *sbuf, dns_session_t *session, dns_msg_
      * the server supports EDNS as well, it SHOULD include one OPT RR in the
      * first response message and MAY do so in subsequent response messages
      */
+#if 0   /* we don't send OPT RR in AXFR response */
     if (session->sess_extflags & SESSION_EDNS_REQUESTED)
         session_write_resources_opt(session, &handle);
+#endif
 
     if ((sbuf->sb_buflen = dns_msg_write_close(&handle)) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_close() failed", MODULE);
