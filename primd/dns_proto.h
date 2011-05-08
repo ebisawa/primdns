@@ -48,6 +48,7 @@ typedef struct {
     uint16_t  hdr_arcount;
 } __attribute__((packed)) dns_header_t;
 
+#define DNS_OP2FLAG(op)    (((op) & 0x000f) << 11)
 #define DNS_OPCODE(flag)   (((flag) & 0x4800) >> 11)
 #define DNS_RCODE(flag)    (((flag) & 0x000f))
 

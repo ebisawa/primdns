@@ -27,24 +27,10 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __DNS_ACL_H__
-#define __DNS_ACL_H__
+#ifndef __DNS_NOTIFY_H__
+#define __DNS_NOTIFY_H__
 
-typedef struct {
-    uint32_t           ae4_addr;
-    uint32_t           ae4_mask;
-} dns_acl_entry4_t;
-
-typedef struct {
-    int                acl_count;
-    int                acl_entry_max;
-    dns_acl_entry4_t  *acl_entry;
-} dns_acl_t;
-
-int dns_acl_init(dns_acl_t *acl);
-void dns_acl_free(dns_acl_t *acl);
-int dns_acl_add(dns_acl_t *acl, struct sockaddr *sa);
-int dns_acl_match(dns_acl_t *acl, struct sockaddr *sa);
-void dns_acl_each(dns_acl_t *acl, void *param, void (*func)(uint32_t addr, uint32_t mask, void *param));
+void dns_notify_all_slaves(void);
+int dns_notify_send(struct sockaddr *to, char *zone_name);
 
 #endif

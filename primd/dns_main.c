@@ -43,6 +43,7 @@
 #include "dns_config.h"
 #include "dns_control.h"
 #include "dns_engine.h"
+#include "dns_notify.h"
 #include "dns_sock.h"
 #include "dns_session.h"
 
@@ -419,6 +420,8 @@ main_sighup_proc(void)
     dns_config_update(Options.opt_config);
     dns_cache_invalidate(NULL);
     plog(LOG_INFO, "config updated");
+
+    dns_notify_all_slaves();
 }
 
 static void

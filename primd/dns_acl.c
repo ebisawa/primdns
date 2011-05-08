@@ -88,6 +88,18 @@ dns_acl_match(dns_acl_t *acl, struct sockaddr *sa)
     return 0;
 }
 
+void
+dns_acl_each(dns_acl_t *acl, void *param, void (*func)(uint32_t addr, uint32_t mask, void *param))
+{
+    int i;
+    dns_acl_entry4_t *entry4;
+
+    for (i = 0; i < acl->acl_count; i++) {
+        entry4 = &acl->acl_entry[i];
+        func(entry4->ae4_addr, entry4->ae4_mask, param);
+    }
+}
+
 static int
 acl_extend_addr4(dns_acl_t *acl)
 {
