@@ -32,6 +32,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include "dns.h"
 #include "dns_acl.h"
 
 #define MODULE "acl"

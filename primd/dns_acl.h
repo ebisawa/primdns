@@ -29,7 +29,6 @@
  */
 #ifndef __DNS_ACL_H__
 #define __DNS_ACL_H__
-#include "dns.h"
 
 typedef struct {
     uint32_t           ae4_addr;
