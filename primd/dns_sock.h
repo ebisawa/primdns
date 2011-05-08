@@ -35,14 +35,15 @@
 #include <netinet/in.h>
 #include "dns.h"
 
-#define DNS_SOCK_THREADS       2
-#define DNS_SOCK_TIMEOUT       1
-#define DNS_SOCK_TCP_MAX    1024
-#define DNS_SOCK_EVENT_MAX    32
+#define DNS_SOCK_THREADS        2
+#define DNS_SOCK_TIMEOUT        1
+#define DNS_SOCK_TCP_MAX     1024
+#define DNS_SOCK_EVENT_MAX     32
 
-#define DNS_SOCK_CHAR_UDP    'u'
-#define DNS_SOCK_CHAR_TCP    't'
-#define DNS_SOCK_CHAR_TCP_L  'T'
+#define DNS_SOCK_CHAR_UDP     'u'
+#define DNS_SOCK_CHAR_TCP     't'
+#define DNS_SOCK_CHAR_TCP_L   'T'
+#define DNS_SOCK_CHAR_NOTIFY  'n'
 
 typedef struct dns_sock_event dns_sock_event_t;
 typedef struct dns_sock_prop dns_sock_prop_t;
@@ -58,7 +59,7 @@ typedef struct {
 typedef int (dns_sock_select_func_t)(dns_sock_t *sock, int thread_id);
 typedef int (dns_sock_recv_func_t)(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 typedef int (dns_sock_send_func_t)(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-typedef void (dns_sock_release_func_t)(dns_sock_t *sock);
+typedef void (dns_sock_timeout_func_t)(dns_sock_t *sock);
 
 struct dns_sock_event {
     int                       sev_fd;
@@ -70,15 +71,16 @@ struct dns_sock_prop {
     dns_sock_select_func_t   *sp_select_func;
     dns_sock_recv_func_t     *sp_recv_func;
     dns_sock_send_func_t     *sp_send_func;
-    dns_sock_release_func_t  *sp_release_func;
+    dns_sock_timeout_func_t  *sp_timeout_func;
 };
 
 struct dns_sock {
     unsigned                  sock_state;
     unsigned                  sock_refs;
-    int                       sock_fd;
-    time_t                    sock_lastused;
     dns_sock_prop_t          *sock_prop;
+    int                       sock_fd;
+    int                       sock_timeout;
+    time_t                    sock_lastevent;
 };
 
 int dns_sock_init(void);
@@ -86,8 +88,9 @@ int dns_sock_start_thread(void);
 int dns_sock_proc(void);
 int dns_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 int dns_sock_send(dns_sock_buf_t *sbuf);
-void dns_sock_release(dns_sock_t *sock);
-void dns_sock_invalidate(dns_sock_t *sock);
+void dns_sock_timeout(dns_sock_t *sock, int timeout);
+void dns_sock_free(dns_sock_t *sock);
 void dns_sock_gc(void);
+dns_sock_t *dns_sock_udp_add(int sock_fd, dns_sock_prop_t *sprop);
 
 #endif

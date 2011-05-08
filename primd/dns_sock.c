@@ -50,6 +50,7 @@
 #define SOCK_FREE        0
 #define SOCK_RESERVED    1
 #define SOCK_ACTIVE      2
+#define SOCK_CLOSED      3
 
 #define SOCK_INVALID     (1 << (sizeof(unsigned) * 8 - 1))
 
@@ -59,12 +60,11 @@ int dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swai
 
 static void *sock_thread_routine(void *param);
 static int sock_proc(dns_sock_event_t *sev, int thread_id);
-static int sock_listen(int type);
-static int sock_listen2(int type, struct sockaddr *sa);
+static int sock_listen_wild(int type);
+static int sock_listen_addr(int type, struct sockaddr *sa);
 static int sock_nonblock(dns_sock_t *sock);
 static dns_sock_t *sock_get(void);
 static void sock_activate(dns_sock_event_t *sev, dns_sock_t *sock);
-static void sock_free(dns_sock_t *sock);
 static int sock_udp_init(struct sockaddr *baddr);
 static int sock_udp_select(dns_sock_t *sock, int thread_id);
 static int sock_udp_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
@@ -74,10 +74,10 @@ static int sock_tcp_select(dns_sock_t *sock, int thread_id);
 static int sock_tcp_child_init(dns_sock_t *sock, int child_fd);
 static int sock_tcp_child_select(dns_sock_t *sock, int thread_id);
 static int sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
-static int sock_tcp_child_getmsg(void *buf, int bufmax, int sock_fd, int flags);
+static int sock_tcp_child_getmsg(void *buf, int bufmax, int flags, dns_sock_t *sock);
 static int sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
 static void sock_tcp_child_release(dns_sock_t *sock);
-static int sock_set_refflag(dns_sock_t *sock, unsigned flag);
+static void sock_tcp_child_timeout(dns_sock_t *sock);
 
 static pthread_t SockThreads[DNS_SOCK_THREADS];
 static dns_sock_t SockPool[DNS_SOCK_TCP_MAX + 4];
@@ -87,17 +87,17 @@ static dns_sock_event_t SockEventUdp, SockEventTcp;
 
 static dns_sock_prop_t SockPropUdp = {
     DNS_SOCK_CHAR_UDP, DNS_UDP_MSG_MAX,
-    sock_udp_select, sock_udp_recv, sock_udp_send, NULL
+    sock_udp_select, sock_udp_recv, sock_udp_send, NULL,
 };
 
 static dns_sock_prop_t SockPropTcp = {
     DNS_SOCK_CHAR_TCP_L, 0,
-    sock_tcp_select, NULL, NULL, NULL
+    sock_tcp_select, NULL, NULL, NULL,
 };
 
 static dns_sock_prop_t SockPropTcpChild = {
     DNS_SOCK_CHAR_TCP, DNS_TCP_MSG_MAX,
-    sock_tcp_child_select, sock_tcp_child_recv, sock_tcp_child_send, sock_tcp_child_release
+    sock_tcp_child_select, sock_tcp_child_recv, sock_tcp_child_send, sock_tcp_child_timeout,
 };
 
 int
@@ -109,16 +109,16 @@ dns_sock_init(void)
         return -1;
 
     if (Options.opt_baddr.ss_family == 0) {
-        if (sock_listen(SOCK_DGRAM) < 0)
+        if (sock_listen_wild(SOCK_DGRAM) < 0)
             return -1;
-        if (sock_listen(SOCK_STREAM) < 0)
+        if (sock_listen_wild(SOCK_STREAM) < 0)
             return -1;
     } else {
         dns_util_sasetport((SA *) &Options.opt_baddr, Options.opt_port);
 
-        if (sock_listen2(SOCK_DGRAM, (SA *) &Options.opt_baddr) < 0)
+        if (sock_listen_addr(SOCK_DGRAM, (SA *) &Options.opt_baddr) < 0)
             return -1;
-        if (sock_listen2(SOCK_STREAM, (SA *) &Options.opt_baddr) < 0)
+        if (sock_listen_addr(SOCK_STREAM, (SA *) &Options.opt_baddr) < 0)
             return -1;
     }
 
@@ -165,58 +165,83 @@ dns_sock_send(dns_sock_buf_t *sbuf)
 {
     dns_sock_t *sock = sbuf->sb_sock;
 
-    if (sock->sock_prop->sp_send_func != NULL)
-        return sock->sock_prop->sp_send_func(sock, sbuf);
+    if (sock->sock_prop->sp_send_func != NULL) {
+        if (sock->sock_prop->sp_send_func(sock, sbuf) < 0)
+            return -1;
+    }
 
     return 0;
 }
 
 void
-dns_sock_release(dns_sock_t *sock)
+dns_sock_timeout(dns_sock_t *sock, int timeout)
 {
-    unsigned oldval;
-
-    if (SOCK_IS_TCP_CHILD(sock)) {
-        oldval = ATOMIC_XADD(&sock->sock_refs, -1);
-        if (oldval == (SOCK_INVALID + 1)) {
-            if (sock->sock_prop->sp_release_func != NULL)
-                sock->sock_prop->sp_release_func(sock);
-        }
-    }
+    sock->sock_timeout = timeout;
 }
 
 void
-dns_sock_invalidate(dns_sock_t *sock)
+dns_sock_free(dns_sock_t *sock)
 {
-    if (SOCK_IS_TCP_CHILD(sock)) {
-        plog(LOG_DEBUG, "%s: invalidate sock %p, fd = %d", MODULE, sock, sock->sock_fd);
-        sock_set_refflag(sock, SOCK_INVALID);
+    // XXX race? if message received just before closing socket?
+
+    if (sock->sock_fd > 0) {
+        plog(LOG_DEBUG, "%s: close fd = %d", MODULE, sock->sock_fd);
+        close(sock->sock_fd);
     }
+
+    memset(sock, 0, sizeof(*sock));
 }
 
 void
 dns_sock_gc(void)
 {
     int i;
-    time_t now;
+    time_t now = time(NULL);
     dns_sock_t *sock;
-
-    now = time(NULL);
 
     for (i = 0; i < NELEMS(SockPool); i++) {
         sock = &SockPool[i];
         if (sock->sock_state != SOCK_ACTIVE)
             continue;
-        if (!SOCK_IS_TCP_CHILD(sock))
+        if (sock->sock_prop->sp_timeout_func == NULL)
+            continue;
+        if (sock->sock_timeout == 0)
             continue;
 
-        if (sock->sock_refs == 0 || sock->sock_refs == SOCK_INVALID) {
-            if (now >= sock->sock_lastused + DNS_SOCK_TIMEOUT) {
-                if (sock->sock_prop->sp_release_func != NULL)
-                    sock->sock_prop->sp_release_func(sock);
-            }
+        if (now > sock->sock_lastevent + sock->sock_timeout) {
+            plog(LOG_DEBUG, "%s: timeout event on sock %p", MODULE, sock);
+
+            if (sock->sock_prop->sp_timeout_func != NULL)
+                sock->sock_prop->sp_timeout_func(sock);
+
+            sock->sock_lastevent = now;
+            sock->sock_timeout = 0;
         }
     }
+}
+
+dns_sock_t *
+dns_sock_udp_add(int sock_fd, dns_sock_prop_t *sprop)
+{
+    dns_sock_t *sock;
+
+    if ((sock = sock_get()) == NULL) {
+        plog(LOG_ERR, "%s: can't get socket resource", MODULE);
+        return NULL;
+    }
+
+    sock->sock_fd = sock_fd;
+    sock->sock_prop = sprop;
+
+    if (sock_nonblock(sock) < 0) {
+        plog(LOG_ERR, "%s: sock_nonblock() failed", MODULE);
+        dns_sock_free(sock);
+        return NULL;
+    }
+
+    sock_activate(&SockEventUdp, sock);
+
+    return sock;
 }
 
 static void *
@@ -236,6 +261,7 @@ static int
 sock_proc(dns_sock_event_t *sev, int thread_id)
 {
     int i, count;
+    time_t now = time(NULL);
     dns_sock_t *sock, *rsocks[DNS_SOCK_EVENT_MAX];
 
     if ((count = dns_sock_event_wait(rsocks, NELEMS(rsocks), sev)) < 0)
@@ -245,10 +271,14 @@ sock_proc(dns_sock_event_t *sev, int thread_id)
         sock = rsocks[i];
         if (sock == NULL || sock->sock_state != SOCK_ACTIVE)
             continue;
+
+        sock->sock_lastevent = now;
         if (sock->sock_prop->sp_select_func != NULL) {
             plog(LOG_DEBUG, "%s: sock event (fd = %d)", MODULE, sock->sock_fd);
-            if (sock->sock_prop->sp_select_func(sock, thread_id) < 0)
-                rsocks[i] = NULL;
+            sock->sock_prop->sp_select_func(sock, thread_id);
+
+            if (sock->sock_state == SOCK_CLOSED)
+                dns_sock_free(sock);
         }
     }
 
@@ -256,7 +286,7 @@ sock_proc(dns_sock_event_t *sev, int thread_id)
 }
 
 static int
-sock_listen(int type)
+sock_listen_wild(int type)
 {
     char ports[8];
     struct addrinfo hints, *res, *res0;
@@ -272,7 +302,7 @@ sock_listen(int type)
     }
 
     for (res = res0; res != NULL; res = res->ai_next) {
-        if (sock_listen2(res->ai_socktype, res->ai_addr) < 0) {
+        if (sock_listen_addr(res->ai_socktype, res->ai_addr) < 0) {
             freeaddrinfo(res0);
             return -1;
         }
@@ -283,7 +313,7 @@ sock_listen(int type)
 }
 
 static int
-sock_listen2(int type, struct sockaddr *sa)
+sock_listen_addr(int type, struct sockaddr *sa)
 {
     char buf[256];
 
@@ -341,7 +371,7 @@ sock_get(void)
         sock = &SockPool[i];
         if (sock->sock_state == SOCK_FREE) {
             if (ATOMIC_CAS(&sock->sock_state, SOCK_FREE, SOCK_RESERVED)) {
-                sock->sock_fd = -1;
+                sock->sock_lastevent = time(NULL);
                 return sock;
             }
         }
@@ -357,18 +387,6 @@ sock_activate(dns_sock_event_t *sev, dns_sock_t *sock)
     sock->sock_state = SOCK_ACTIVE;
 }
 
-static void
-sock_free(dns_sock_t *sock)
-{
-    if (sock->sock_fd > 0) {
-        plog(LOG_DEBUG, "%s: close fd = %d", MODULE, sock->sock_fd);
-        close(sock->sock_fd);
-    }
-
-    sock->sock_fd = 0;
-    sock->sock_state = SOCK_FREE;
-}
-
 static int
 sock_udp_init(struct sockaddr *baddr)
 {
@@ -381,17 +399,16 @@ sock_udp_init(struct sockaddr *baddr)
     }
 
     if ((sock_fd = dns_util_socket_sa(baddr->sa_family, SOCK_DGRAM, baddr)) < 0) {
-        sock_free(sock);
+        dns_sock_free(sock);
         return -1;
     }
 
-    memset(sock, 0, sizeof(*sock));
     sock->sock_fd = sock_fd;
     sock->sock_prop = &SockPropUdp;
 
     if (sock_nonblock(sock) < 0) {
-        plog(LOG_ERR, "%s: sock_nonblock() failed", __func__);
-        sock_free(sock);
+        plog(LOG_ERR, "%s: sock_nonblock() failed", MODULE);
+        dns_sock_free(sock);
         return -1;
     }
 
@@ -445,23 +462,22 @@ sock_tcp_init(struct sockaddr *baddr)
     }
 
     if ((sock_fd = dns_util_socket_sa(baddr->sa_family, SOCK_STREAM, baddr)) < 0) {
-        sock_free(sock);
+        dns_sock_free(sock);
         return -1;
     }
 
-    memset(sock, 0, sizeof(*sock));
     sock->sock_fd = sock_fd;
     sock->sock_prop = &SockPropTcp;
 
     if (listen(sock_fd, DNS_SOCK_TCP_MAX) < 0) {
         plog_error(LOG_ERR, MODULE, "listen() failed");
-        sock_free(sock);
+        dns_sock_free(sock);
         return -1;
     }
 
     if (sock_nonblock(sock) < 0) {
-        plog(LOG_ERR, "%s: sock_nonblock() failed", __func__);
-        sock_free(sock);
+        plog(LOG_ERR, "%s: sock_nonblock() failed", MODULE);
+        dns_sock_free(sock);
         return -1;
     }
 
@@ -486,7 +502,7 @@ sock_tcp_select(dns_sock_t *sock, int thread_id)
 
         fromlen = sizeof(struct sockaddr_storage);
         if ((fd = accept(sock->sock_fd, (SA *) &from, &fromlen)) < 0) {
-            sock_free(sock_tcp);
+            dns_sock_free(sock_tcp);
             if (errno == EAGAIN)
                 break;
 
@@ -494,11 +510,11 @@ sock_tcp_select(dns_sock_t *sock, int thread_id)
             return -1;
         }
 
-        plog(LOG_DEBUG, "%s: accept fd = %d", __func__, fd);
+        plog(LOG_DEBUG, "%s: accept fd = %d", MODULE, fd);
 
         if (sock_tcp_child_init(sock_tcp, fd) < 0) {
-            plog(LOG_ERR, "%s: sock_tcp_child_init() failed (fd = %d)", __func__, fd);
-            sock_free(sock_tcp);
+            plog(LOG_ERR, "%s: sock_tcp_child_init() failed (fd = %d)", MODULE, fd);
+            dns_sock_free(sock_tcp);
             /* try next socket */
         }
     }
@@ -509,13 +525,12 @@ sock_tcp_select(dns_sock_t *sock, int thread_id)
 static int
 sock_tcp_child_init(dns_sock_t *sock, int child_fd)
 {
-    memset(sock, 0, sizeof(*sock));
     sock->sock_fd = child_fd;
-    sock->sock_lastused = time(NULL);
     sock->sock_prop = &SockPropTcpChild;
+    sock->sock_timeout = DNS_SOCK_TIMEOUT;
 
     if (sock_nonblock(sock) < 0) {
-        plog(LOG_ERR, "%s: sock_nonblock() failed", __func__);
+        plog(LOG_ERR, "%s: sock_nonblock() failed", MODULE);
         return -1;
     }
 
@@ -527,6 +542,7 @@ sock_tcp_child_init(dns_sock_t *sock, int child_fd)
 static int
 sock_tcp_child_select(dns_sock_t *sock, int thread_id)
 {
+    int r;
     unsigned refs;
 
     for (;;) {
@@ -544,7 +560,10 @@ sock_tcp_child_select(dns_sock_t *sock, int thread_id)
             break;
     }
 
-    return dns_session_request(sock, thread_id);
+    r = dns_session_request(sock, thread_id);
+    ATOMIC_DEC(&sock->sock_refs);
+
+    return r;
 }
 
 static int
@@ -554,7 +573,7 @@ sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
     socklen_t fromlen;
 
     /* peek */
-    if ((len = sock_tcp_child_getmsg(sbuf->sb_buf, sizeof(sbuf->sb_buf), sock->sock_fd, MSG_PEEK)) < 0)
+    if ((len = sock_tcp_child_getmsg(sbuf->sb_buf, sizeof(sbuf->sb_buf), MSG_PEEK, sock)) < 0)
         return -1;
 
     /* incompeleted message */
@@ -562,7 +581,7 @@ sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
         return 0;
 
     /* receive */
-    if ((len = sock_tcp_child_getmsg(sbuf->sb_buf, sizeof(sbuf->sb_buf), sock->sock_fd, 0)) <= 0) {
+    if ((len = sock_tcp_child_getmsg(sbuf->sb_buf, sizeof(sbuf->sb_buf), 0, sock)) <= 0) {
         plog(LOG_ERR, "%s: sock_tcp_child_getmsg() failed", MODULE);
         return -1;
     }
@@ -577,14 +596,17 @@ sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 }
 
 static int
-sock_tcp_child_getmsg(void *buf, int bufmax, int sock_fd, int flags)
+sock_tcp_child_getmsg(void *buf, int bufmax, int flags, dns_sock_t *sock)
 {
     int len;
     uint16_t msglen;
 
-    len = recv(sock_fd, &msglen, sizeof(msglen), flags);
-    if (len == 0)
+    len = recv(sock->sock_fd, &msglen, sizeof(msglen), flags);
+    if (len == 0) {
+        sock->sock_state = SOCK_CLOSED;
         return -1;  /* closed by peer */
+    }
+
     if (len != sizeof(msglen))
         return 0;   /* incompleted */
 
@@ -594,7 +616,7 @@ sock_tcp_child_getmsg(void *buf, int bufmax, int sock_fd, int flags)
         return -1;  /* abort session */
     }
 
-    len = recv(sock_fd, buf, msglen, flags);
+    len = recv(sock->sock_fd, buf, msglen, flags);
     if (len != msglen)
         return 0;
 
@@ -620,8 +642,6 @@ sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
         return -1;
     }
 
-    sock->sock_lastused = time(NULL);
-
     return 0;
 }
 
@@ -629,23 +649,18 @@ static void
 sock_tcp_child_release(dns_sock_t *sock)
 {
     plog(LOG_DEBUG, "%s: free sock = %p, fd = %d", MODULE, sock, sock->sock_fd);
-    sock_free(sock);
+    dns_sock_free(sock);
 }
 
-static int
-sock_set_refflag(dns_sock_t *sock, unsigned flag)
+static void
+sock_tcp_child_timeout(dns_sock_t *sock)
 {
-    unsigned l, n;
-
-    for (;;) {
-        l = sock->sock_refs;
-        n = l | flag;
-
-        if (l & flag)
-            return -1;
-        if (ATOMIC_CAS(&sock->sock_refs, l, n))
-            break;
+    if (sock->sock_refs != 0)
+        return;
+    if (!ATOMIC_CAS(&sock->sock_refs, 0, SOCK_INVALID)) {
+        /* invalidated by other thread or message received. we leave it */
+        return;
     }
 
-    return 0;
+    sock_tcp_child_release(sock);
 }

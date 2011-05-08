@@ -84,7 +84,7 @@ static int session_request_normal(dns_session_t *session, dns_sock_buf_t *sbuf);
 static int session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf);
 static int session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf);
 static int session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, dns_msg_handle_t *handle);
-static int session_validate_question(dns_header_t *header);
+static int session_check_question_header(dns_header_t *header);
 static dns_cache_rrset_t *session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf);
 static dns_cache_rrset_t *session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset);
 static dns_cache_rrset_t *session_query_recursive(dns_session_t *session, dns_msg_question_t *q, int nlevel);
@@ -237,11 +237,8 @@ session_request_basic(dns_sock_t *sock, int thread_id)
     dns_sock_buf_t sbuf;
     dns_session_t *session;
 
-    if (session_request_recv(&sbuf, sock) < 0) {
-        dns_sock_invalidate(sock);
-        dns_sock_release(sock);
+    if (session_request_recv(&sbuf, sock) < 0)
         return -1;
-    }
 
     session = &MainSessions[thread_id];
     session_request_proc(session, &sbuf);
@@ -264,7 +261,6 @@ session_request_multi(dns_sock_t *sock, int thread_id)
     }
 
     if (session_request_recv(sbuf, sock) < 0) {
-        dns_sock_release(sock);
         dns_pool_release(&SessionBufPool, sbuf);
         return -1;
     }
@@ -330,6 +326,11 @@ session_request_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 
     if ((len = dns_sock_recv(sbuf, sock)) < 0) {
         /* read failed, socket closed by peer or receive incompleted */
+        return -1;
+    }
+
+    if (len == 0) {
+        plog(LOG_DEBUG, "%s: partial message received", MODULE);
         return -1;
     }
 
@@ -439,13 +440,13 @@ session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
         return DNS_RCODE_SERVFAIL;
     }
 
-    dns_msg_parse_soa(NULL, NULL,  &serial, NULL, NULL, NULL, NULL, &soa);
-    plog(LOG_INFO, "transfer zone \"%s\" to %s: started (serial %u)", zone->z_name, from, serial);
+    plog(LOG_INFO, "zone transfer request of \"%s\" from %s", zone->z_name, from);
 
     if ((r = session_send_axfr(sbuf, session, &soa)) != 0)
         return r;
 
-    plog(LOG_INFO, "transfer zone \"%s\" to %s: completed (serial %u)", zone->z_name, from, serial);
+    dns_msg_parse_soa(NULL, NULL,  &serial, NULL, NULL, NULL, NULL, &soa);
+    plog(LOG_INFO, "transfer zone \"%s\" to %s completed (serial %u)", zone->z_name, from, serial);
 
     return DNS_RCODE_NOERROR;
 }
@@ -457,11 +458,6 @@ session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
     dns_header_t header;
     dns_msg_handle_t handle;
     dns_msg_question_t question;
-
-    if (sbuf->sb_buflen == 0) {
-        /* message not arrived in tcp */
-        return -1;
-    }
 
     if (dns_msg_read_open(&handle, sbuf->sb_buf, sbuf->sb_buflen) < 0) {
         plog(LOG_NOTICE, "%s: message read failed", MODULE);
@@ -479,7 +475,9 @@ session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
     session_init(session, msgid, flags);
 
     /* error response can be sent after session_init() */
-    if (session_validate_question(&header) < 0)
+    if (DNS_OPCODE(flags) != DNS_OP_QUERY)
+        return DNS_RCODE_NOTIMP;
+    if (session_check_question_header(&header) < 0)
         return DNS_RCODE_FORMERR;
     if (dns_msg_read_question(&question, &handle) < 0)
         return DNS_RCODE_FORMERR;
@@ -519,15 +517,8 @@ session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, dns_msg_hand
 }
 
 static int
-session_validate_question(dns_header_t *header)
+session_check_question_header(dns_header_t *header)
 {
-    uint16_t msgid, flags;
-
-    msgid = ntohs(header->hdr_id);
-    flags = ntohs(header->hdr_flags);
-
-    if (DNS_OPCODE(flags) != DNS_OP_QUERY)
-        return -1;
     if (ntohs(header->hdr_qdcount) != 1)
         return -1;
     if (ntohs(header->hdr_arcount) > 1)
@@ -687,8 +678,6 @@ session_send_response(dns_sock_buf_t *sbuf)
 static void
 session_send_finish(dns_sock_buf_t *sbuf)
 {
-    dns_sock_release(sbuf->sb_sock);
-
     if (WorkerSessions != NULL)
         dns_pool_release(&SessionBufPool, sbuf);
 }
