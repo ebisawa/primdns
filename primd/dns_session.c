@@ -57,9 +57,9 @@
 #define IS_VALID_QUESTION(q)     ((q)->mq_class != 0 && (q)->mq_type != 0)
 
 typedef struct {
-    unsigned                  stat_request;
-    unsigned                  stat_error;
-    unsigned                  stat_response;
+    unsigned   stat_request;
+    unsigned   stat_error;
+    unsigned   stat_response;
 } session_stats_t;
 
 static int NumWorkers;
@@ -412,41 +412,34 @@ session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
     dns_msg_resource_t soa;
     dns_config_zone_t *zone;
 
-    q = &session->sess_question;
-    zone = session->sess_zone;
+    q = &session->sess_question;  zone = session->sess_zone;
     dns_util_sa2str_wop(from, sizeof(from), (SA *) &sbuf->sb_remote);
 
-    /* slave? */
     if (!dns_acl_match(&zone->z_slaves.zss_acl, (SA *) &sbuf->sb_remote)) {
         plog(LOG_NOTICE, "%s: unauthorized AXFR request from %s", MODULE, from);
         return DNS_RCODE_REFUSED;
     }
 
-    /* tcp? */
-    if (sbuf->sb_sock->sock_prop->sp_char != DNS_SOCK_CHAR_TCP) {
+    if (SOCK_CHAR(sbuf->sb_sock) != DNS_SOCK_CHAR_TCP) {
         plog(LOG_ERR, "%s: AXFR requested but connection is not TCP", MODULE);
         return DNS_RCODE_SERVFAIL;
     }
 
-    /* query name = zone name? */
     if (strcasecmp(q->mq_name, zone->z_name) != 0) {
         plog(LOG_ERR, "%s: AXFR requested but not authoritative for zone \"%s\"", MODULE, q->mq_name);
         return DNS_RCODE_NOTAUTH;   /* RFC5936 2.2.1. */
     }
 
-    /* lookup SOA record */
     if (session_query_zone_resource(&soa, session, q, DNS_TYPE_SOA) < 0) {
         plog(LOG_ERR, "%s: no SOA record for zone \"%s\"", MODULE, zone->z_name);
         return DNS_RCODE_SERVFAIL;
     }
 
-    plog(LOG_INFO, "zone transfer request of \"%s\" from %s", zone->z_name, from);
+    dns_msg_parse_soa(NULL, NULL,  &serial, NULL, NULL, NULL, NULL, &soa);
+    plog(LOG_INFO, "AXFR request from %s (zone \"%s\", serial %u)", from, zone->z_name, serial);
 
     if ((r = session_send_axfr(sbuf, session, &soa)) != 0)
         return r;
-
-    dns_msg_parse_soa(NULL, NULL,  &serial, NULL, NULL, NULL, NULL, &soa);
-    plog(LOG_INFO, "transfer zone \"%s\" to %s completed (serial %u)", zone->z_name, from, serial);
 
     return DNS_RCODE_NOERROR;
 }
@@ -744,7 +737,7 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
     rcode = dns_cache_getrcode(rrset);
     flags = dns_cache_getflags(rrset);
 
-    resmax = sbuf->sb_sock->sock_prop->sp_msgmax;
+    resmax = SOCK_MSGMAX(sbuf->sb_sock);
     resmax = session_max_payload_size(session, resmax);
 
     if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
@@ -794,7 +787,8 @@ session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg
      * (and its extension via the EDNS0 mechanism specified in [RFC2671])
      * is not relevant for AXFR
      */
-    resmax = sbuf->sb_sock->sock_prop->sp_msgmax;
+    resmax = SOCK_MSGMAX(sbuf->sb_sock);
+
     if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_open() failed", MODULE);
         return -1;
@@ -832,7 +826,7 @@ session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode)
     dns_msg_handle_t handle;
 
     plog(LOG_DEBUG, "%s: send error response", MODULE);
-    resmax = sbuf->sb_sock->sock_prop->sp_msgmax;
+    resmax = SOCK_MSGMAX(sbuf->sb_sock);
 
     if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_open() failed", MODULE);

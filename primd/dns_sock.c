@@ -50,9 +50,10 @@
 #define SOCK_FREE        0
 #define SOCK_RESERVED    1
 #define SOCK_ACTIVE      2
-#define SOCK_CLOSED      3
 
 #define SOCK_INVALID     (1 << (sizeof(unsigned) * 8 - 1))
+#define SOCK_FLAGMASK    (SOCK_INVALID)
+#define SOCK_REFS(sock)  ((sock)->sock_refs & ~SOCK_FLAGMASK)
 
 int dns_sock_event_init(dns_sock_event_t *swait);
 int dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock);
@@ -64,6 +65,9 @@ static int sock_listen_wild(int type);
 static int sock_listen_addr(int type, struct sockaddr *sa);
 static int sock_nonblock(dns_sock_t *sock);
 static dns_sock_t *sock_get(void);
+static void sock_free(dns_sock_t *sock);
+static int sock_retain(dns_sock_t *sock);
+static void sock_release(dns_sock_t *sock);
 static void sock_activate(dns_sock_event_t *sev, dns_sock_t *sock);
 static int sock_udp_init(struct sockaddr *baddr);
 static int sock_udp_select(dns_sock_t *sock, int thread_id);
@@ -76,8 +80,8 @@ static int sock_tcp_child_select(dns_sock_t *sock, int thread_id);
 static int sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int sock_tcp_child_getmsg(void *buf, int bufmax, int flags, dns_sock_t *sock);
 static int sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-static void sock_tcp_child_release(dns_sock_t *sock);
 static void sock_tcp_child_timeout(dns_sock_t *sock);
+static int sock_set_refflag(dns_sock_t *sock, unsigned flag);
 
 static pthread_t SockThreads[DNS_SOCK_THREADS];
 static dns_sock_t SockPool[DNS_SOCK_TCP_MAX + 4];
@@ -97,7 +101,8 @@ static dns_sock_prop_t SockPropTcp = {
 
 static dns_sock_prop_t SockPropTcpChild = {
     DNS_SOCK_CHAR_TCP, DNS_TCP_MSG_MAX,
-    sock_tcp_child_select, sock_tcp_child_recv, sock_tcp_child_send, sock_tcp_child_timeout,
+    sock_tcp_child_select, sock_tcp_child_recv, sock_tcp_child_send,
+    sock_tcp_child_timeout,
 };
 
 int
@@ -136,12 +141,10 @@ dns_sock_start_thread(void)
     return 0;
 }
 
-int
+void
 dns_sock_proc(void)
 {
     sock_proc(&SockEventTcp, 0);
-
-    return 0;
 }
 
 int
@@ -174,26 +177,18 @@ dns_sock_send(dns_sock_buf_t *sbuf)
 }
 
 void
-dns_sock_timeout(dns_sock_t *sock, int timeout)
-{
-    sock->sock_timeout = timeout;
-}
-
-void
 dns_sock_free(dns_sock_t *sock)
 {
-    // XXX race? if message received just before closing socket?
+    if (sock_set_refflag(sock, SOCK_INVALID) < 0)
+        return;
+    if (SOCK_REFS(sock) != 0)
+        return;
 
-    if (sock->sock_fd > 0) {
-        plog(LOG_DEBUG, "%s: close fd = %d", MODULE, sock->sock_fd);
-        close(sock->sock_fd);
-    }
-
-    memset(sock, 0, sizeof(*sock));
+    sock_free(sock);
 }
 
 void
-dns_sock_gc(void)
+dns_sock_timer_proc(void)
 {
     int i;
     time_t now = time(NULL);
@@ -205,17 +200,41 @@ dns_sock_gc(void)
             continue;
         if (sock->sock_prop->sp_timeout_func == NULL)
             continue;
-        if (sock->sock_timeout == 0)
+        if (sock->sock_timer.st_timeout == 0)
             continue;
 
-        if (now > sock->sock_lastevent + sock->sock_timeout) {
+        if (now > sock->sock_timer.st_lastevent + sock->sock_timer.st_timeout) {
             plog(LOG_DEBUG, "%s: timeout event on sock %p", MODULE, sock);
+
+            sock->sock_timer.st_timeout = 0;
+            sock->sock_timer.st_tocount++;
+            sock->sock_timer.st_lastevent = now;
 
             if (sock->sock_prop->sp_timeout_func != NULL)
                 sock->sock_prop->sp_timeout_func(sock);
+        }
+    }
+}
 
-            sock->sock_lastevent = now;
-            sock->sock_timeout = 0;
+void
+dns_sock_timer_set(dns_sock_t *sock, int timeout, int timer_id)
+{
+    sock->sock_timer.st_id = timer_id;
+    sock->sock_timer.st_timeout = timeout;
+}
+
+void
+dns_sock_timer_cancel(int timer_id)
+{
+    int i;
+    dns_sock_t *sock;
+
+    for (i = 0; i < NELEMS(SockPool); i++) {
+        sock = &SockPool[i];
+        if (sock->sock_timer.st_id == timer_id) {
+            plog(LOG_DEBUG, "%s: timer cancelled: sock = %p", MODULE, sock);
+            sock->sock_timer.st_timeout = 0;
+            dns_sock_free(sock);
         }
     }
 }
@@ -271,14 +290,15 @@ sock_proc(dns_sock_event_t *sev, int thread_id)
         sock = rsocks[i];
         if (sock == NULL || sock->sock_state != SOCK_ACTIVE)
             continue;
+        if (sock->sock_refs & SOCK_INVALID)
+            continue;
 
-        sock->sock_lastevent = now;
-        if (sock->sock_prop->sp_select_func != NULL) {
-            plog(LOG_DEBUG, "%s: sock event (fd = %d)", MODULE, sock->sock_fd);
-            sock->sock_prop->sp_select_func(sock, thread_id);
+        plog(LOG_DEBUG, "%s: sock event (fd = %d)", MODULE, sock->sock_fd);
+        sock->sock_timer.st_lastevent = now;
 
-            if (sock->sock_state == SOCK_CLOSED)
-                dns_sock_free(sock);
+        while (sock->sock_prop != NULL && sock->sock_prop->sp_select_func != NULL) {
+            if (sock->sock_prop->sp_select_func(sock, thread_id) < 0)
+                break;
         }
     }
 
@@ -371,13 +391,52 @@ sock_get(void)
         sock = &SockPool[i];
         if (sock->sock_state == SOCK_FREE) {
             if (ATOMIC_CAS(&sock->sock_state, SOCK_FREE, SOCK_RESERVED)) {
-                sock->sock_lastevent = time(NULL);
+                sock->sock_timer.st_lastevent = time(NULL);
                 return sock;
             }
         }
     }
 
     return NULL;
+}
+
+static void
+sock_free(dns_sock_t *sock)
+{
+    plog(LOG_DEBUG, "%s: free sock = %p, fd = %d", MODULE, sock, sock->sock_fd);
+
+    if (sock->sock_fd > 0) {
+        plog(LOG_DEBUG, "%s: close fd = %d", MODULE, sock->sock_fd);
+        close(sock->sock_fd);
+    }
+
+    memset(sock, 0, sizeof(*sock));
+}
+
+static int
+sock_retain(dns_sock_t *sock)
+{
+    unsigned refs;
+
+retry:
+    if ((refs = sock->sock_refs) & SOCK_INVALID)
+        return -1;
+
+    if (!ATOMIC_CAS(&sock->sock_refs, refs, refs + 1))
+        goto retry;
+
+    return 0;
+}
+
+static void
+sock_release(dns_sock_t *sock)
+{
+    unsigned oldval;
+
+    oldval = ATOMIC_XADD(&sock->sock_refs, -1);
+
+    if (oldval == SOCK_INVALID + 1)
+        sock_free(sock);
 }
 
 static void
@@ -399,6 +458,7 @@ sock_udp_init(struct sockaddr *baddr)
     }
 
     if ((sock_fd = dns_util_socket_sa(baddr->sa_family, SOCK_DGRAM, baddr)) < 0) {
+        plog(LOG_ERR, "%s: dns_util_socket_sa() failed", MODULE);
         dns_sock_free(sock);
         return -1;
     }
@@ -462,6 +522,7 @@ sock_tcp_init(struct sockaddr *baddr)
     }
 
     if ((sock_fd = dns_util_socket_sa(baddr->sa_family, SOCK_STREAM, baddr)) < 0) {
+        plog(LOG_ERR, "%s: dns_util_socket_sa() failed", MODULE);
         dns_sock_free(sock);
         return -1;
     }
@@ -495,18 +556,18 @@ sock_tcp_select(dns_sock_t *sock, int thread_id)
     struct sockaddr_storage from;
 
     for (;;) {
-        if ((sock_tcp = sock_get()) == NULL) {
-            plog(LOG_DEBUG, "%s: socket resource full", MODULE);
-            return -1;
-        }
-
         fromlen = sizeof(struct sockaddr_storage);
         if ((fd = accept(sock->sock_fd, (SA *) &from, &fromlen)) < 0) {
-            dns_sock_free(sock_tcp);
             if (errno == EAGAIN)
                 break;
 
             plog_error(LOG_ERR, MODULE, "accept() failed");
+            return -1;
+        }
+
+        if ((sock_tcp = sock_get()) == NULL) {
+            plog(LOG_DEBUG, "%s: socket resource full", MODULE);
+            close(fd);
             return -1;
         }
 
@@ -515,7 +576,6 @@ sock_tcp_select(dns_sock_t *sock, int thread_id)
         if (sock_tcp_child_init(sock_tcp, fd) < 0) {
             plog(LOG_ERR, "%s: sock_tcp_child_init() failed (fd = %d)", MODULE, fd);
             dns_sock_free(sock_tcp);
-            /* try next socket */
         }
     }
 
@@ -527,7 +587,7 @@ sock_tcp_child_init(dns_sock_t *sock, int child_fd)
 {
     sock->sock_fd = child_fd;
     sock->sock_prop = &SockPropTcpChild;
-    sock->sock_timeout = DNS_SOCK_TIMEOUT;
+    dns_sock_timer_set(sock, DNS_SOCK_TIMEOUT, DNS_SOCK_TIMER_TCP);
 
     if (sock_nonblock(sock) < 0) {
         plog(LOG_ERR, "%s: sock_nonblock() failed", MODULE);
@@ -543,25 +603,12 @@ static int
 sock_tcp_child_select(dns_sock_t *sock, int thread_id)
 {
     int r;
-    unsigned refs;
 
-    for (;;) {
-        /*
-         * do not process request if invalid flags is set,
-         * otherwise increment reference counter to get
-         * ownership of this socket.
-         */
-        if ((refs = sock->sock_refs) & SOCK_INVALID) {
-            plog(LOG_DEBUG, "%s: XXX ignore event due to the socket is invalidated", MODULE);
-            return -1;
-        }
-
-        if (ATOMIC_CAS(&sock->sock_refs, refs, refs + 1))
-            break;
-    }
+    if (sock_retain(sock) < 0)
+        return -1;
 
     r = dns_session_request(sock, thread_id);
-    ATOMIC_DEC(&sock->sock_refs);
+    sock_release(sock);
 
     return r;
 }
@@ -603,7 +650,8 @@ sock_tcp_child_getmsg(void *buf, int bufmax, int flags, dns_sock_t *sock)
 
     len = recv(sock->sock_fd, &msglen, sizeof(msglen), flags);
     if (len == 0) {
-        sock->sock_state = SOCK_CLOSED;
+        plog(LOG_DEBUG, "%s: socket closed by peer", MODULE);
+        dns_sock_free(sock);
         return -1;  /* closed by peer */
     }
 
@@ -646,21 +694,27 @@ sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 }
 
 static void
-sock_tcp_child_release(dns_sock_t *sock)
+sock_tcp_child_timeout(dns_sock_t *sock)
 {
-    plog(LOG_DEBUG, "%s: free sock = %p, fd = %d", MODULE, sock, sock->sock_fd);
+    plog(LOG_DEBUG, "%s: socket timeout: sock = %p", MODULE, sock);
+
     dns_sock_free(sock);
 }
 
-static void
-sock_tcp_child_timeout(dns_sock_t *sock)
+static int
+sock_set_refflag(dns_sock_t *sock, unsigned flag)
 {
-    if (sock->sock_refs != 0)
-        return;
-    if (!ATOMIC_CAS(&sock->sock_refs, 0, SOCK_INVALID)) {
-        /* invalidated by other thread or message received. we leave it */
-        return;
+    unsigned l, n;
+
+    for (;;) {
+        l = sock->sock_refs;
+        n = l | flag;
+
+        if (l & flag)
+            return -1;
+        if (ATOMIC_CAS(&sock->sock_refs, l, n))
+            break;
     }
 
-    sock_tcp_child_release(sock);
+    return 0;
 }

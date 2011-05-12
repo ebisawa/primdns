@@ -43,14 +43,18 @@
 
 #define MODULE "notify"
 
-#define NOTIFY_TIMEOUT  3
+#define NOTIFY_TIMEOUT  60
+#define NOTIFY_RETRY     4
 
 static void notify_each_addr4(uint32_t addr, uint32_t mask, void *zone_name);
+static int notify_send(struct sockaddr *to, char *zone_name);
+static int notify_send_sock(dns_sock_t *sock, char *zone_name);
 static int notify_make_message(char *buf, int bufmax, char *zone_name);
 static int notify_sock_select(dns_sock_t *sock, int thread_id);
 static int notify_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
 static void notify_sock_timeout(dns_sock_t *sock);
+static void notify_log(dns_sock_t *sock, char *zone_name);
 
 static dns_sock_prop_t SockPropNotify = {
     DNS_SOCK_CHAR_NOTIFY, DNS_UDP_MSG_MAX,
@@ -69,12 +73,31 @@ dns_notify_all_slaves(void)
     }
 }
 
-int
-dns_notify_send(struct sockaddr *to, char *zone_name)
+static void
+notify_each_addr4(uint32_t addr, uint32_t mask, void *zone_name)
 {
-    int s, len;
+    struct sockaddr_in sin;
+
+    if (mask != 0xffffffff)
+        return;
+
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = htonl(addr);
+    sin.sin_port = htons(DNS_PORT);
+    /* XXX sin_len? */
+
+    if (notify_send((SA *) &sin, zone_name) < 0) {
+        plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
+        return;
+    }
+}
+
+static int
+notify_send(struct sockaddr *to, char *zone_name)
+{
+    int s;
     dns_sock_t *sock;
-    dns_sock_buf_t sbuf;
 
     if ((s = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
         plog_error(LOG_ERR, MODULE, "socket() failed");
@@ -93,47 +116,34 @@ dns_notify_send(struct sockaddr *to, char *zone_name)
         return -1;
     }
 
+    sock->sock_timer.st_udata = zone_name;
+    return notify_send_sock(sock, zone_name);
+}
+
+static int
+notify_send_sock(dns_sock_t *sock, char *zone_name)
+{
+    int len;
+    dns_sock_buf_t sbuf;
+
+    notify_log(sock, zone_name);
+
     if ((len = notify_make_message(sbuf.sb_buf, sizeof(sbuf.sb_buf), zone_name)) < 0) {
         dns_sock_free(sock);
         return -1;
     }
 
-    memcpy(&sbuf.sb_remote, to, SALEN(to));
     sbuf.sb_buflen = len;
     sbuf.sb_sock = sock;
 
-    dns_sock_timeout(sock, NOTIFY_TIMEOUT);
     if (dns_sock_send(&sbuf) < 0) {
-        plog_error(LOG_ERR, MODULE, "dns_sock_send() failed");
         dns_sock_free(sock);
         return -1;
     }
 
+    dns_sock_timer_set(sock, NOTIFY_TIMEOUT, DNS_SOCK_TIMER_NOTIFY);
+
     return 0;
-}
-
-static void
-notify_each_addr4(uint32_t addr, uint32_t mask, void *zone_name)
-{
-    char buf[64];
-    struct sockaddr_in sin;
-
-    if (mask != 0xffffffff)
-        return;
-
-    memset(&sin, 0, sizeof(sin));
-    sin.sin_family = AF_INET;
-    sin.sin_addr.s_addr = htonl(addr);
-    sin.sin_port = htons(DNS_PORT);
-    /* XXX sin_len? */
-
-    dns_util_sa2str_wop(buf, sizeof(buf), (SA *) &sin);
-    plog(LOG_INFO, "send notify for zone \"%s\" to %s", zone_name, buf);
-
-    if (dns_notify_send((SA *) &sin, zone_name) < 0) {
-        plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
-        return;
-    }
 }
 
 static int
@@ -183,7 +193,7 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
 {
     dns_sock_buf_t sbuf;
 
-    plog(LOG_DEBUG, "%s: XXX receive event: fd = %d", __func__, sock->sock_fd);
+    plog(LOG_DEBUG, "%s: receive event: fd = %d", __func__, sock->sock_fd);
 
     if (dns_sock_recv(&sbuf, sock) < 0) {
         /* connection refused? -> stop sending */
@@ -218,17 +228,40 @@ notify_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
 static int
 notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 {
-    plog(LOG_DEBUG, "%s: notify send: fd = %d", MODULE, sock->sock_fd);
-
     return send(sock->sock_fd, sbuf->sb_buf, sbuf->sb_buflen, 0);
 }
 
 static void
 notify_sock_timeout(dns_sock_t *sock)
 {
-    plog(LOG_DEBUG, "%s: XXX timeout event: fd = %d", __func__, sock->sock_fd);
+    plog(LOG_DEBUG, "%s: timeout event: fd = %d, retry = %d",
+         MODULE, sock->sock_fd, sock->sock_timer.st_tocount);
 
-    /* XXX resend notify message */
+    if (sock->sock_timer.st_tocount > NOTIFY_RETRY) {
+        dns_sock_free(sock);
+        return;
+    }
 
-    dns_sock_free(sock);
+    if (notify_send_sock(sock, sock->sock_timer.st_udata) < 0) {
+        plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
+        dns_sock_free(sock);
+        return;
+    }
+}
+
+static void
+notify_log(dns_sock_t *sock, char *zone_name)
+{
+    char buf[64];
+    socklen_t slen;
+    struct sockaddr_storage ss;
+
+    slen = sizeof(ss);
+    if (getpeername(sock->sock_fd, (SA *) &ss, &slen) < 0) {
+        plog_error(LOG_ERR, MODULE, "getpeername() failed");
+        return;
+    }
+
+    dns_util_sa2str_wop(buf, sizeof(buf), (SA *) &ss);
+    plog(LOG_INFO, "send notify to %s (zone \"%s\")", buf, zone_name);
 }

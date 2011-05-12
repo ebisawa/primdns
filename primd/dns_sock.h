@@ -36,7 +36,7 @@
 #include "dns.h"
 
 #define DNS_SOCK_THREADS        2
-#define DNS_SOCK_TIMEOUT        1
+#define DNS_SOCK_TIMEOUT        3
 #define DNS_SOCK_TCP_MAX     1024
 #define DNS_SOCK_EVENT_MAX     32
 
@@ -45,7 +45,14 @@
 #define DNS_SOCK_CHAR_TCP_L   'T'
 #define DNS_SOCK_CHAR_NOTIFY  'n'
 
+#define DNS_SOCK_TIMER_TCP      1
+#define DNS_SOCK_TIMER_NOTIFY   2
+
+#define SOCK_CHAR(sock)       ((sock)->sock_prop->sp_char)
+#define SOCK_MSGMAX(sock)     ((sock)->sock_prop->sp_msgmax)
+
 typedef struct dns_sock_event dns_sock_event_t;
+typedef struct dns_sock_timer dns_sock_timer_t;
 typedef struct dns_sock_prop dns_sock_prop_t;
 typedef struct dns_sock dns_sock_t;
 
@@ -65,6 +72,14 @@ struct dns_sock_event {
     int                       sev_fd;
 };
 
+struct dns_sock_timer {
+    int                       st_id;
+    int                       st_timeout;
+    int                       st_tocount;
+    void                     *st_udata;
+    time_t                    st_lastevent;
+};
+
 struct dns_sock_prop {
     char                      sp_char;
     int                       sp_msgmax;
@@ -75,22 +90,22 @@ struct dns_sock_prop {
 };
 
 struct dns_sock {
+    int                       sock_fd;
     unsigned                  sock_state;
     unsigned                  sock_refs;
     dns_sock_prop_t          *sock_prop;
-    int                       sock_fd;
-    int                       sock_timeout;
-    time_t                    sock_lastevent;
+    dns_sock_timer_t          sock_timer;
 };
 
 int dns_sock_init(void);
 int dns_sock_start_thread(void);
-int dns_sock_proc(void);
+void dns_sock_proc(void);
 int dns_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 int dns_sock_send(dns_sock_buf_t *sbuf);
-void dns_sock_timeout(dns_sock_t *sock, int timeout);
 void dns_sock_free(dns_sock_t *sock);
-void dns_sock_gc(void);
+void dns_sock_timer_proc(void);
+void dns_sock_timer_set(dns_sock_t *sock, int timeout, int timer_id);
+void dns_sock_timer_cancel(int timer_id);
 dns_sock_t *dns_sock_udp_add(int sock_fd, dns_sock_prop_t *sprop);
 
 #endif

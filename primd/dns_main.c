@@ -369,7 +369,7 @@ main_loop(void)
 {
     for (;;) {
         dns_sock_proc();
-        dns_sock_gc();
+        dns_sock_timer_proc();
 
         main_signal_proc(SIGHUP, main_sighup_proc);
         main_signal_proc(SIGTERM, main_sigterm_proc);
@@ -417,10 +417,11 @@ static void
 main_sighup_proc(void)
 {
     plog(LOG_INFO, "SIGHUP received");
+    dns_sock_timer_cancel(DNS_SOCK_TIMER_NOTIFY);
     dns_config_update(Options.opt_config);
     dns_cache_invalidate(NULL);
-    plog(LOG_INFO, "config updated");
 
+    plog(LOG_INFO, "config updated");
     dns_notify_all_slaves();
 }
 
