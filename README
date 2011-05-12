@@ -89,7 +89,9 @@ primdns - A Simple DNS Contents Server Software
 * 起動オプション
 
 usage: primd [options..]
-options:  -b [addr]    listen on addr
+options:  -4           ipv4 only
+          -6           ipv6 only
+          -b [addr]    listen on addr
           -c [path]    config file path
           -d           enable debug log
           -f           foreground mode
@@ -101,6 +103,8 @@ options:  -b [addr]    listen on addr
           -M [size]    cache pool size in MB
           -T [num]     number of worker threads
 
+  -4    IPv4 でのみ問い合わせを受信します。
+  -6    IPv6 でのみ問い合わせを受信します。
   -b    サーバが問い合わせを受信するアドレスを指定します。
         未指定時は全てのアドレスで受信します。
   -c    設定ファイルのパスを指定します。
@@ -126,111 +130,149 @@ options:  -b [addr]    listen on addr
         [ <ENGINE_NAME> <PARAMETER> ; ]
         [ ... ]
       };
+
+    [ slaves {
+          <SLAVE_IPV4_ADDR> ;
+        [ <SLAVE_IPV4_ADDR> ; ]
+        [ ... ]
+      }; ]
   };
- 
-  ゾーンごとにリソース検索に用いるエンジンと、データファイル名等の
-  パラメータを設定します。複数のエンジンが設定されている場合には、
-  問い合わせのリソースが見つかるまで先頭から順にデータベースを検索
-  していきます。
 
-  <ENGINE_NAME> に指定できるものには以下のものがあります。
+  - search
 
-  (1) data エンジン
+    ゾーンごとにリソース検索に用いるエンジンと、データファイル名等の
+    パラメータを設定します。複数のエンジンが設定されている場合には、
+    問い合わせのリソースが見つかるまで先頭から順にデータベースを検索
+    していきます。
 
-    データファイルを参照するエンジンです。データファイルは独自形式の
-    バイナリファイルです。これはテキストで記述されたゾーンファイルを
-    付属のツールにより変換することで得ることができます。
+    <ENGINE_NAME> に指定できるものには以下のものがあります。
 
-    パラメータとしてファイル名を記述します。
+    (1) data エンジン
+
+      データファイルを参照するエンジンです。データファイルは独自形式の
+      バイナリファイルです。これはテキストで記述されたゾーンファイルを
+      付属のツールにより変換することで得ることができます。
+
+      パラメータとしてファイル名を記述します。
+
+      [設定例]
+      zone "localhost" {
+        search {
+          data "/etc/primd/localhost.dat";
+        };
+      };
+
+      zone "127.in-addr.arpa" {
+        search {
+          data "/etc/primd/127.in-addr.arpa.dat";
+        };
+      };
+
+    (2) external エンジン
+
+      指定された外部コマンドを実行し、その結果を DNS 問い合わせ結果とします。
+      パラメータとして実行ファイル名を記述します。
+
+      [設定例]
+      zone "example.com" {
+        search {
+          external "/usr/local/libexec/example.sh";
+        };
+      };
+
+      問い合わせ内容は、外部コマンド実行時の引数として渡されます。
+
+        argv[0]: コマンド名
+        argv[1]: 問い合わせドメイン名
+        argv[2]: 問い合わせクラス名
+        argv[3]: 問い合わせタイプ名
+
+      外部コマンドは、次の形式で結果を返さなくてはなりません。
+
+        1行目: DNS リザルトコード (NOERROR=0, NXDOMAIN=3, RFC2136 参照)
+        2行目: "<ドメイン名> <TTL> <クラス> <タイプ> <データ>" の形式
+        3行目以降: レコードが複数続く場合は 2 行目と同形式で続ける
+
+      外部コマンドが返却したデータは、最大で TTL 時間キャッシュされます。
+      キャッシュ上にデータが存在する場合は外部コマンドが実行されません。
+
+      なお、現在のところ、クラスは "IN" のみ、タイプは "A" および "PTR"
+      のみのサポートなっています。
+
+    (3) forward エンジン
+
+      指定された別の DNS サーバに問い合わせを転送します。
+      転送先には、recursive な問い合わせを行います。
+
+      ※ 現在のところ、UDP での問い合わせのみ対応しています。
+
+      [設定例]
+      zone "example.net" {
+        search {
+          forward 192.0.2.1;
+        };
+      };
+
+    - 複数エンジンの利用
+
+      ゾーン設定の search セクションにおいて複数のエンジンが設定されている
+      場合には、先頭に記述されたものから順に問い合わせを行い、最初に発見
+      された結果を採用し、クライアントに返します。
+
+      次の例では、まず最初に外部コマンド実行し、問い合わせのリソースが
+      見つからない場合は、データファイルを参照します。
+
+      [設定例]
+      zone "example.org" {
+        search {
+          external "/usr/local/libexec/example.org.sh";
+          data "/etc/primd/example.org.data";
+        };
+      };
+
+      また次の例では、データファイルが複数のファイルに分割されています。
+
+      [設定例]
+      zone "example.org" {
+        search {
+          data "/etc/primd/example.org.1.dat";
+          data "/etc/primd/example.org.2.dat";
+          data "/etc/primd/example.org.3.dat";
+        };
+      };
+
+  - slaves
+
+    ゾーン転送を許可するスレーブサーバの IP アドレスを記述します。
+    ここに記載されたサーバからの AXFR によるゾーン転送を受け付けます。
+    また、起動時および SIGHUP による設定再読み込み時に NOTIFY を送信します。
+
+    data エンジンを使用するゾーンでのみゾーン転送を行うことができます。
+    search リストに複数の data エンジンが含まれる場合、データファイルを
+    またがって重複するレコードがないようにしてください。
+
+    ※ 現在のところ、スレーブとの通信は IPv4 でのみ行うことができます。
 
     [設定例]
-    zone "localhost" {
+    zone "example.jp" {
       search {
-        data "/etc/primd/localhost.dat";
+        data "example.jp.dat";
+      };
+
+      slaves {
+        198.51.100.1;
+        198.51.100.2;
       };
     };
-
-    zone "0.0.127.in-addr.arpa" {
-      search {
-        data "/etc/primd/0.0.127.in-addr.arpa.dat";
-      };
-    };
-
-  (2) external エンジン
-
-    指定された外部コマンドを実行し、その結果を DNS 問い合わせ結果とします。
-    パラメータとして実行ファイル名を記述します。
-
-    [設定例]
-    domain "example.com" {
-      search {
-        external("/usr/local/libexec/extcmd.sh");
-      };
-    };
-
-    問い合わせ内容は、外部コマンド実行時の引数として渡されます。
-
-      argv[0]: コマンド名
-      argv[1]: 問い合わせドメイン名
-      argv[2]: 問い合わせクラス名
-      argv[3]: 問い合わせタイプ名
-
-    外部コマンドは、次の形式で結果を返さなくてはなりません。
-
-      1行目: DNS リザルトコード (NOERROR=0, NXDOMAIN=3, RFC2136 参照)
-      2行目: "<ドメイン名> <TTL> <クラス> <タイプ> <データ>" の形式
-      3行目以降: レコードが複数続く場合は 2 行目と同形式で続ける
-
-    外部コマンドが返却したデータは、最大で TTL 時間キャッシュされます。
-    キャッシュ上にデータが存在する場合は外部コマンドが実行されません。
-
-    なお、現在のところ、クラスは "IN" のみ、タイプは "A" および "PTR"
-    のみのサポートなっています。
-
-  (3) forward エンジン
-
-    指定された別の DNS サーバに問い合わせを転送します。
-
-    [設定例]
-    domain "example.net" {
-      search {
-        forward 192.0.2.1;
-      };
-    };
-
-* 複数エンジンの利用
-
-  ゾーン設定の search セクションにおいて複数のエンジンが設定されている
-  場合には、先頭に記述されたものから順に問い合わせを行い、最初に発見
-  された結果を採用し、クライアントに返します。
-
-  次の例では、まず最初にデータファイルの検索を行い、問い合わせのリソース
-  が見つからない場合は、別のサーバに問い合わせを転送します。
-
-  [設定例]
-  domain "example.org" {
-    search {
-      data "/etc/primd/example.org.data";
-      forward 192.0.2.2;
-    }
-  }
-
-  また次の例では、データファイルが複数のファイルに分割されています。
-
-  [設定例]
-  domain "example.net" {
-    search {
-      data "/etc/primd/example.net.dat.1";
-      data "/etc/primd/example.net.dat.2";
-    }
-  }
-
-* TODO
-
-  いまどき IPv6 トランスポートと DNSSEC をサポートしないのは恥ずかしいので
-  早急に対応する必要があると思っています。
 
 * ライセンス
+
+  本ソフトウェアは、以下の通り、いわゆる BSD ライセンスにより自由に再頒布や
+  使用をすることができます。
+
+  本ソフトウェアは「現状のまま」提供されるものであって、何の保証もなされません。
+  著作権者や貢献者は、本ソフトウェアの使用から発生した損害について一切責任を
+  負わないものとします。
 
   Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
 
