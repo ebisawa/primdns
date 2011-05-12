@@ -110,6 +110,7 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
 
     plog(LOG_INFO, "%s started", PROGNAME);
+    dns_notify_all_slaves();
     main_loop();
 
     return EXIT_SUCCESS;
