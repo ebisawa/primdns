@@ -144,9 +144,11 @@ dns_config_find_zone(char *name, int class)
         if (zone->z_class == class || class == DNS_CLASS_ANY) {
             len = strlen(zone->z_name);
             if (buflen >= len && len > match_len) {
-                if (strcmp(&buf[buflen - len], zone->z_name) == 0) {
-                    candidate = zone;
-                    match_len = len;
+                if (buflen == len || buf[buflen - len - 1] == '.') {
+                    if (strcmp(&buf[buflen - len], zone->z_name) == 0) {
+                        candidate = zone;
+                        match_len = len;
+                    }
                 }
             }
         }
