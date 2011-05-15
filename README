@@ -1,4 +1,4 @@
-primdns - A Simple DNS Contents Server Software
+primdns - A Simple DNS Contents Server
 
 * 特徴
 
@@ -16,13 +16,27 @@ primdns - A Simple DNS Contents Server Software
 * 動作環境
 
   BSD 系の OS、または Linux で利用することができます。
-  以下の環境での動作を確認しています。
+  例えば以下の環境で動作していた実績があります。
 
   - FreeBSD 8.2-RELEASE
   - Linux 2.6.35 (Ubuntu 10.10)
   - Mac OS X 10.5.8
 
   その他に、関連ツールの実行に Ruby が必要です。
+
+* 変更履歴
+
+  - 0.7
+    - 機能追加・変更
+      - IPv6 トランスポート対応
+      - EDNS0 対応 (4096 バイトまで UDP で応答可能)
+      - AXFR によるゾーン転送機能を追加 (マスタサーバ側のみ)
+      - NOTIFY 送信機能を追加 (マスタサーバ側のみ)
+    - 不具合修正
+      - primdns-makedb が ruby 1.9.x 動作しない問題を修正
+      - conf ファイルの読み込みに失敗する問題を修正
+      - ゾーン検索順序が conf ファイル記載順だった問題を修正
+      - TCP による問い合わせと同時に SIGHUP を受けるとデッドロックする問題を修正
 
 * インストール
 
