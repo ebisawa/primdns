@@ -103,20 +103,20 @@ static int data_destroy(data_config_t *conf);
 static int data_query(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
 static int data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *edump);
 
-static int data_dump_checkpos(data_pos_t *dpos, data_config_t *conf);
-static int data_dump_nextpos(data_pos_t *dpos, data_config_t *conf);
+static int data_validate(data_header_t *header);
 static int data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
 static int data_query_search_head(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q);
 static int data_query_bsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q);
 static int data_query_lsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q, int low);
-static int data_hashindex(char *name, int hashsize);
+static int data_hash_index(char *name, int hashsize);
+static data_record_t *data_hash_record(data_config_t *conf, data_hash_t *hash);
 static int data_record_compare_name(data_record_t *record, data_config_t *conf, char *name);
 static int data_record_compare_class_type(data_record_t *record, dns_msg_question_t *q);
+static char *data_record_name(data_config_t *conf, data_record_t *record);
+static void *data_record_data(data_config_t *conf, data_record_t *record);
+static int data_dump_checkpos(data_pos_t *dpos, data_config_t *conf);
+static int data_dump_nextpos(data_pos_t *dpos, data_config_t *conf);
 static int data_record2res(dns_msg_resource_t *res, data_config_t *conf, data_record_t *record);
-static data_record_t *data_record(data_config_t *conf, data_hash_t *hash);
-static char *data_name(data_config_t *conf, data_record_t *record);
-static void *data_data(data_config_t *conf, data_record_t *record);
-static int data_validate(data_header_t *header);
 
 static data_stats_t DataStats;
 
@@ -241,7 +241,7 @@ data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *e
     }
 
     hash = &conf->conf_hash[dpos->dp_hashi];
-    if ((record = data_record(conf, hash)) == NULL)
+    if ((record = data_hash_record(conf, hash)) == NULL)
         return -1;
 
     p = &record[dpos->dp_datai];
@@ -254,35 +254,20 @@ data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *e
 }
 
 static int
-data_dump_checkpos(data_pos_t *dpos, data_config_t *conf)
+data_validate(data_header_t *header)
 {
-    data_hash_t *hash;
-
-    if (dpos->dp_hashi >= conf->conf_hashsize)
+    if (ntohl(header->df_magic) != DATA_MAGIC) {
+        plog(LOG_ERR, "%s: file magic mismatch", MODULE);
         return -1;
+    }
 
-    hash = &conf->conf_hash[dpos->dp_hashi];
-    if (dpos->dp_datai >= ntohl(hash->dh_count))
+    if (ntohs(header->df_version) != DATA_VERSION) {
+        plog(LOG_ERR, "%s: file version mismatch (%d)", MODULE, ntohs(header->df_version));
         return -1;
-
-    return 0;
-}
-
-static int
-data_dump_nextpos(data_pos_t *dpos, data_config_t *conf)
-{
-    dpos->dp_datai++;
-    while (data_dump_checkpos(dpos, conf) < 0) {
-        dpos->dp_hashi++;
-        dpos->dp_datai = 0;
-
-        if (dpos->dp_hashi >= conf->conf_hashsize)
-            return -1;
     }
 
     return 0;
 }
-
 
 static int
 data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls)
@@ -295,14 +280,14 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
     if (conf->conf_hashsize == 0)
         return -1;
 
-    hashval = data_hashindex(q->mq_name, conf->conf_hashsize);
+    hashval = data_hash_index(q->mq_name, conf->conf_hashsize);
     hash = &conf->conf_hash[hashval];
 
     if ((index = data_query_search_head(conf, hash, q)) < 0) {
         dns_cache_setrcode(rrset, DNS_RCODE_NXDOMAIN);
         dns_cache_negative(rrset, 0);
     } else {
-        if ((record = data_record(conf, hash)) == NULL)
+        if ((record = data_hash_record(conf, hash)) == NULL)
             return -1;
 
         for (i = index; i < ntohl(hash->dh_count); i++) {
@@ -353,7 +338,7 @@ data_query_bsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q
     int r, low, high, mid;
     data_record_t *record;
 
-    if ((record = data_record(conf, hash)) == NULL)
+    if ((record = data_hash_record(conf, hash)) == NULL)
         return -1;
 
     low = 0;
@@ -383,7 +368,7 @@ data_query_lsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q
     int i, r;
     data_record_t *record;
 
-    if ((record = data_record(conf, hash)) == NULL)
+    if ((record = data_hash_record(conf, hash)) == NULL)
         return -1;
 
     for (i = low; i < ntohl(hash->dh_count); i++) {
@@ -399,7 +384,7 @@ data_query_lsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q
 }
 
 static int
-data_hashindex(char *name, int hashsize)
+data_hash_index(char *name, int hashsize)
 {
     char *p;
     uint32_t h = FNV1_INITIAL_BASIS;
@@ -413,13 +398,30 @@ data_hashindex(char *name, int hashsize)
     return h % hashsize;
 }
 
+static data_record_t *
+data_hash_record(data_config_t *conf, data_hash_t *hash)
+{
+    data_record_t *record;
+
+    if (hash->dh_count == 0)
+        return NULL;
+
+    record = (data_record_t *) (conf->conf_data + ntohl(hash->dh_offset));
+    if (INVALID_PTR(conf, record)) {
+        plog(LOG_ERR, "%s: invalid data file (data_record)", MODULE);
+        return NULL;
+    }
+
+    return record;
+}
+
 static int
 data_record_compare_name(data_record_t *record, data_config_t *conf, char *name)
 {
     int r;
     char *r_name;
 
-    if ((r_name = data_name(conf, record)) == NULL)
+    if ((r_name = data_record_name(conf, record)) == NULL)
         return -1;
     if ((r = strcasecmp(r_name, name)) != 0)
         return r;
@@ -448,45 +450,8 @@ data_record_compare_class_type(data_record_t *record, dns_msg_question_t *q)
     return 0;
 }
 
-static int
-data_record2res(dns_msg_resource_t *res, data_config_t *conf, data_record_t *record)
-{
-    void *name, *data;
-
-    if ((name = data_name(conf, record)) == NULL)
-        return -1;
-    if ((data = data_data(conf, record)) == NULL)
-        return -1;
-
-    STRLCPY(res->mr_q.mq_name, name, sizeof(res->mr_q.mq_name));
-    res->mr_q.mq_type = ntohs(record->dr_type);
-    res->mr_q.mq_class = ntohs(record->dr_class);
-    res->mr_ttl = ntohl(record->dr_ttl);
-    res->mr_datalen = ntohs(record->dr_datalen);
-    memcpy(res->mr_data, data, ntohs(record->dr_datalen));
-
-    return 0;
-}
-
-static data_record_t *
-data_record(data_config_t *conf, data_hash_t *hash)
-{
-    data_record_t *record;
-
-    if (hash->dh_count == 0)
-        return NULL;
-
-    record = (data_record_t *) (conf->conf_data + ntohl(hash->dh_offset));
-    if (INVALID_PTR(conf, record)) {
-        plog(LOG_ERR, "%s: invalid data file (data_record)", MODULE);
-        return NULL;
-    }
-
-    return record;
-}
-
 static char *
-data_name(data_config_t *conf, data_record_t *record)
+data_record_name(data_config_t *conf, data_record_t *record)
 {
     void *name;
 
@@ -500,7 +465,7 @@ data_name(data_config_t *conf, data_record_t *record)
 }
 
 static void *
-data_data(data_config_t *conf, data_record_t *record)
+data_record_data(data_config_t *conf, data_record_t *record)
 {
     void *data;
 
@@ -514,17 +479,51 @@ data_data(data_config_t *conf, data_record_t *record)
 }
 
 static int
-data_validate(data_header_t *header)
+data_dump_checkpos(data_pos_t *dpos, data_config_t *conf)
 {
-    if (ntohl(header->df_magic) != DATA_MAGIC) {
-        plog(LOG_ERR, "%s: file magic mismatch", MODULE);
+    data_hash_t *hash;
+
+    if (dpos->dp_hashi >= conf->conf_hashsize)
         return -1;
+
+    hash = &conf->conf_hash[dpos->dp_hashi];
+    if (dpos->dp_datai >= ntohl(hash->dh_count))
+        return -1;
+
+    return 0;
+}
+
+static int
+data_dump_nextpos(data_pos_t *dpos, data_config_t *conf)
+{
+    dpos->dp_datai++;
+    while (data_dump_checkpos(dpos, conf) < 0) {
+        dpos->dp_hashi++;
+        dpos->dp_datai = 0;
+
+        if (dpos->dp_hashi >= conf->conf_hashsize)
+            return -1;
     }
 
-    if (ntohs(header->df_version) != DATA_VERSION) {
-        plog(LOG_ERR, "%s: file version mismatch (%d)", MODULE, ntohs(header->df_version));
+    return 0;
+}
+
+static int
+data_record2res(dns_msg_resource_t *res, data_config_t *conf, data_record_t *record)
+{
+    void *name, *data;
+
+    if ((name = data_record_name(conf, record)) == NULL)
         return -1;
-    }
+    if ((data = data_record_data(conf, record)) == NULL)
+        return -1;
+
+    STRLCPY(res->mr_q.mq_name, name, sizeof(res->mr_q.mq_name));
+    res->mr_q.mq_type = ntohs(record->dr_type);
+    res->mr_q.mq_class = ntohs(record->dr_class);
+    res->mr_ttl = ntohl(record->dr_ttl);
+    res->mr_datalen = ntohs(record->dr_datalen);
+    memcpy(res->mr_data, data, ntohs(record->dr_datalen));
 
     return 0;
 }
