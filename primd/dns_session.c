@@ -107,6 +107,7 @@ static void session_write_resources_ar(dns_session_t *session, dns_msg_handle_t 
 static void session_write_resources_opt(dns_session_t *session, dns_msg_handle_t *handle);
 static void session_shuffle_resources(dns_session_t *session, dns_msg_resource_t **res, int num);
 static int session_max_payload_size(dns_session_t *session, int defmax);
+static int session_compare_question(dns_msg_question_t *a, dns_msg_question_t *b);
 
 int
 dns_session_init(void)
@@ -912,14 +913,19 @@ session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns
 {
     dns_cache_t *cache, *ca_a;
     dns_cache_rrset_t *rrset;
-    dns_msg_question_t q_a;
+    dns_msg_question_t *q, q_a;
 
+    q = &session->sess_question;
     cache = DNS_CACHE_LIST_HEAD(list);
+
     while (cache != NULL) {
         if (cache->cache_res.mr_q.mq_type == DNS_TYPE_NS) {
             dns_msg_parse_name(q_a.mq_name, &cache->cache_res);
             q_a.mq_type = type;
             q_a.mq_class = cache->cache_res.mr_q.mq_class;
+
+            if (session_compare_question(q, &q_a) == 0)
+                return;
 
             if ((rrset = session_query_internal(session, &q_a, 0)) != NULL) {
                 if (dns_list_count(&rrset->rrset_list_cname) == 0) {
@@ -991,4 +997,22 @@ session_max_payload_size(dns_session_t *session, int defmax)
     }
 
     return max_size;
+}
+
+static int
+session_compare_question(dns_msg_question_t *a, dns_msg_question_t *b)
+{
+    int r;
+
+    if (a->mq_type != DNS_TYPE_ALL && b->mq_type != DNS_TYPE_ALL) {
+        if ((r = a->mq_type - b->mq_type) != 0)
+            return r;
+    }
+
+    if (a->mq_class != DNS_CLASS_ANY && b->mq_type != DNS_CLASS_ANY) {
+        if ((r = a->mq_class - b->mq_class) != 0)
+            return r;
+    }
+
+    return strcasecmp(a->mq_name, b->mq_name);
 }
