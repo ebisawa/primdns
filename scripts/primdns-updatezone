@@ -45,7 +45,12 @@ end
 def default_confdir
   dirs = DEFAULT_CONFDIRS
   mydir = File.dirname($0)
-  dirs.unshift(Pathname.new("#{mydir}/../etc").realpath)
+
+  begin
+    rp = Pathname.new("#{mydir}/../etc").realpath
+    dirs.unshift(rp)
+  rescue Errno::ENOENT
+  end
 
   dirs.each do |d|
     return d if File.directory?(d)
