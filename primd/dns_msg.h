@@ -51,7 +51,7 @@ typedef struct {
     dns_msg_question_t  mr_q;
     uint32_t            mr_ttl;
     uint16_t            mr_datalen;
-    char                mr_data[DNS_RDATA_MAX];
+    uint8_t             mr_data[DNS_RDATA_MAX];
 } dns_msg_resource_t;
 
 #define DNS_MSG_HEADER(handle)   ((dns_header_t *) (handle)->mh_buf)
