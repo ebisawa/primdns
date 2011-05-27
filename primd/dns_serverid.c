@@ -113,6 +113,6 @@ serverid_txt_record(dns_cache_rrset_t *rrset, char *qname, char *txt_string, dns
         plog(LOG_ERR, "%s: can't add cache resource", MODULE);
         return -1;
     }
-    
+
     return 0;
 }
