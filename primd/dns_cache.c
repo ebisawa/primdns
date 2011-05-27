@@ -236,6 +236,9 @@ dns_cache_register(dns_cache_rrset_t *rrset, int category, dns_tls_t *tls)
     cache_hash_t *hash;
     dns_msg_question_t *q;
 
+    if (rrset->rrset_expire <= time(NULL))
+        return;
+
     rrset->rrset_category = category;
     q = &rrset->rrset_question;
 

@@ -38,7 +38,7 @@
 #define DNS_CACHE_HASH_ARRAY_SIZE        3
 
 #define DNS_CACHE_TTL_MAX                604800
-#define DNS_CACHE_TTL_MIN                1
+#define DNS_CACHE_TTL_MIN                0
 #define DNS_CACHE_TTL_NEGATIVE_MAX       3600
 #define DNS_CACHE_TTL_NEGATIVE_DEFAULT   300
 
