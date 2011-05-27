@@ -127,7 +127,7 @@ dns_config_update(char *filename)
 dns_config_zone_t *
 dns_config_find_zone(char *name, int class)
 {
-    int len, buflen, match_len = 0;
+    int len, buflen, match_len = -1;
     char buf[DNS_NAME_MAX];
     dns_config_root_t *root;
     dns_config_zone_t *zone, *candidate = NULL;
@@ -144,7 +144,7 @@ dns_config_find_zone(char *name, int class)
         if (zone->z_class == class || class == DNS_CLASS_ANY) {
             len = strlen(zone->z_name);
             if (buflen >= len && len > match_len) {
-                if (buflen == len || buf[buflen - len - 1] == '.') {
+                if (buflen == len || buf[buflen - len - 1] == '.' || len == 0) {
                     if (strcmp(&buf[buflen - len], zone->z_name) == 0) {
                         candidate = zone;
                         match_len = len;
