@@ -41,11 +41,12 @@
 #include "dns_data.h"
 #include "dns_external.h"
 #include "dns_forward.h"
+#include "dns_serverid.h"
 
 #define MODULE "engine"
 
 static dns_engine_t *QueryEngines[] = {
-    &DataEngine, &ExternalEngine, &ForwardEngine,
+    &DataEngine, &ExternalEngine, &ForwardEngine, &ServerIdEngine,
 };
 
 dns_engine_t *
