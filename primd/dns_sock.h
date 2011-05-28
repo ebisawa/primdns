@@ -66,7 +66,7 @@ typedef struct {
 typedef int (dns_sock_select_func_t)(dns_sock_t *sock, int thread_id);
 typedef int (dns_sock_recv_func_t)(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 typedef int (dns_sock_send_func_t)(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-typedef void (dns_sock_timeout_func_t)(dns_sock_t *sock);
+typedef void (dns_sock_timeout_func_t)(dns_sock_t *sock, void *udata);
 
 struct dns_sock_event {
     int                       sev_fd;
@@ -83,10 +83,10 @@ struct dns_sock_timer {
 struct dns_sock_prop {
     char                      sp_char;
     int                       sp_msgmax;
-    dns_sock_select_func_t   *sp_select_func;
-    dns_sock_recv_func_t     *sp_recv_func;
-    dns_sock_send_func_t     *sp_send_func;
-    dns_sock_timeout_func_t  *sp_timeout_func;
+    dns_sock_select_func_t   *sp_func_select;
+    dns_sock_recv_func_t     *sp_func_recv;
+    dns_sock_send_func_t     *sp_func_send;
+    dns_sock_timeout_func_t  *sp_func_timeout;
 };
 
 struct dns_sock {
@@ -103,9 +103,10 @@ void dns_sock_proc(void);
 int dns_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 int dns_sock_send(dns_sock_buf_t *sbuf);
 void dns_sock_free(dns_sock_t *sock);
-void dns_sock_timer_proc(void);
-void dns_sock_timer_set(dns_sock_t *sock, int timeout, int timer_id);
-void dns_sock_timer_cancel(int timer_id);
 dns_sock_t *dns_sock_udp_add(int sock_fd, dns_sock_prop_t *sprop);
+
+void dns_sock_timer_proc(void);
+void dns_sock_timer_set(dns_sock_t *sock, int timeout, int timer_id, void *udata);
+void dns_sock_timer_cancel(int timer_id);
 
 #endif

@@ -53,7 +53,7 @@ static int notify_make_message(char *buf, int bufmax, char *zone_name);
 static int notify_sock_select(dns_sock_t *sock, int thread_id);
 static int notify_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-static void notify_sock_timeout(dns_sock_t *sock);
+static void notify_sock_timeout(dns_sock_t *sock, char *zone_name);
 static void notify_log(dns_sock_t *sock, char *zone_name);
 
 static dns_sock_prop_t SockPropNotify = {
@@ -116,7 +116,6 @@ notify_send(struct sockaddr *to, char *zone_name)
         return -1;
     }
 
-    sock->sock_timer.st_udata = zone_name;
     return notify_send_sock(sock, zone_name);
 }
 
@@ -141,7 +140,7 @@ notify_send_sock(dns_sock_t *sock, char *zone_name)
         return -1;
     }
 
-    dns_sock_timer_set(sock, NOTIFY_TIMEOUT, DNS_SOCK_TIMER_NOTIFY);
+    dns_sock_timer_set(sock, NOTIFY_TIMEOUT, DNS_SOCK_TIMER_NOTIFY, zone_name);
 
     return 0;
 }
@@ -197,6 +196,7 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
 
     if (dns_sock_recv(&sbuf, sock) < 0) {
         /* connection refused? -> stop sending */
+        plog(LOG_DEBUG, "%s: destination unreachable", __func__);
         dns_sock_free(sock);
         return -1;
     }
@@ -232,7 +232,7 @@ notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 }
 
 static void
-notify_sock_timeout(dns_sock_t *sock)
+notify_sock_timeout(dns_sock_t *sock, char *zone_name)
 {
     plog(LOG_DEBUG, "%s: timeout event: fd = %d, retry = %d",
          MODULE, sock->sock_fd, sock->sock_timer.st_tocount);
@@ -242,7 +242,7 @@ notify_sock_timeout(dns_sock_t *sock)
         return;
     }
 
-    if (notify_send_sock(sock, sock->sock_timer.st_udata) < 0) {
+    if (notify_send_sock(sock, zone_name) < 0) {
         plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
         dns_sock_free(sock);
         return;
