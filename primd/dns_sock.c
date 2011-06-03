@@ -652,23 +652,38 @@ sock_tcp_child_getmsg(void *buf, int bufmax, int flags, dns_sock_t *sock)
     int len;
     uint16_t msglen;
 
-    len = recv(sock->sock_fd, &msglen, sizeof(msglen), flags);
+    if ((len = recv(sock->sock_fd, &msglen, sizeof(msglen), flags)) < 0) {
+        if (errno != EAGAIN) {
+            plog_error(LOG_DEBUG, MODULE, "recv() failed");
+            dns_sock_free(sock);
+            return -1;
+        }
+    }
+
     if (len == 0) {
         plog(LOG_DEBUG, "%s: socket closed by peer", MODULE);
         dns_sock_free(sock);
-        return -1;  /* closed by peer */
+        return -1;
     }
 
     if (len != sizeof(msglen))
-        return 0;   /* incompleted */
+        return 0;   /* message incompleted */
 
     msglen = ntohs(msglen);
     if (msglen > bufmax) {
         plog(LOG_NOTICE, "%s: message too big: msglen = %d (%02x)", MODULE, msglen, msglen);
-        return -1;  /* abort session */
+        dns_sock_free(sock);
+        return -1;
     }
 
-    len = recv(sock->sock_fd, buf, msglen, flags);
+    if ((len = recv(sock->sock_fd, buf, msglen, flags)) < 0) {
+        if (errno != EAGAIN) {
+            plog_error(LOG_DEBUG, MODULE, "recv() failed");
+            dns_sock_free(sock);
+            return -1;
+        }
+    }
+
     if (len != msglen)
         return 0;
 
