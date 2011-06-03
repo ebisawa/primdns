@@ -1,0 +1,311 @@
+#!/usr/bin/env ruby
+#
+#  Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
+#
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions
+#  are met:
+#  1. Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#  2. Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in
+#     the documentation and/or other materials provided with the
+#     distribution.
+#  3. The names of its contributors may not be used to endorse or promote
+#     products derived from this software without specific prior written
+#     permission.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+#  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+#  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+#  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+#  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+#  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+#  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+#  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+#  POSSIBILITY OF SUCH DAMAGE.
+#
+require 'optparse'
+require 'socket'
+
+module DNS
+  PORT       = 53
+  CLASS_IN   = 1
+  TYPE_A     = 1
+  TYPE_NS    = 2
+  TYPE_CNAME = 5
+  TYPE_SOA   = 6
+  TYPE_PTR   = 12
+  TYPE_MX    = 15
+  TYPE_TXT   = 16
+  TYPE_AAAA  = 28
+  TYPE_AXFR  = 252
+
+  TYPE_STRING = {
+    TYPE_A => 'A', TYPE_NS => 'NS', TYPE_CNAME => 'CNAME', TYPE_SOA => 'SOA',
+    TYPE_PTR => 'PTR', TYPE_MX => 'MX', TYPE_TXT => 'TXT', TYPE_AAAA => 'AAAA',
+    TYPE_AXFR => 'AXFR',
+  }
+
+  module NameUtil
+    def name_encode(name)
+      result = ''
+      na = name.split('.')
+      na.each do |np|
+        len = np.size
+        result += [ len ].pack('C')
+        result += np
+      end
+      result += "\0"
+      result
+    end
+
+    def dname_decode(dname, msgbody)
+      result = ""; i = 0
+
+      while i < dname.size
+        len = dname[i]
+        len = len.ord if RUBY_VERSION >= '1.9.0'
+
+        if len == 0
+          return result
+        elsif (len & 0xc0) == 0xc0
+          # compressed
+          index = ((len & ~0xc0) << 8) + dname[i + 1]
+          result += dname_decode(msgbody[index..-1], msgbody)
+          return result
+        else
+          # not compressed
+          result += dname[(i + 1)..(i + 1 + len - 1)] + '.'
+        end
+        i += len + 1
+      end
+      nil
+    end
+
+    def dname_len(dname)
+      len = 0
+      dname.size.times do |i|
+        code = dname[i]
+        code = code.ord if RUBY_VERSION >= '1.9.0'
+        return len + 2 if (code & 0xc0) == 0xc0
+        len += 1
+        break if code == 0
+      end
+      len
+    end
+  end
+
+  class Header
+    attr_reader :qdcount, :ancount, :nscount, :arcount
+
+    def self.parse(msg)
+      self.new(msg)
+    end
+
+    def initialize(msg = nil)
+      if msg == nil
+        @msgid = rand(65536)
+        @qdcount = 1
+      else
+        @msgid, @flags, @qdcount, @ancount, @nscount, @arcount = msg.unpack('nnnnnn')
+      end
+    end
+
+    def rsize
+      12
+    end
+
+    def to_s
+      [ @msgid, 0, @qdcount, 0, 0, 0 ].pack('nnnnnn')
+    end
+  end
+
+  class Question
+    extend NameUtil
+
+    def self.parse(msg)
+      # XXX
+      Question.new(nil, nil, dname_len(msg) + 4)
+    end
+
+    def initialize(name, type, rsize = 0)
+      @name = name
+      @type = type
+      @rsize = rsize
+    end
+
+    def rsize
+      @rsize
+    end
+
+    def to_s
+      Question.name_encode(@name) + [ @type, CLASS_IN ].pack('nn')
+    end
+  end
+
+  class Resource
+    extend NameUtil
+    attr_reader :r_name, :r_class, :r_type, :r_ttl, :r_len, :r_data
+
+    def self.parse(msg)
+      Resource.new(msg)
+    end
+
+    def initialize(res)
+      name_len = Resource.dname_len(res)
+      @r_name = res[0..(name_len - 1)]
+
+      fdat = res[name_len..-1]
+      @r_type, @r_class, @r_ttl, @r_len = fdat.unpack('nnNn')
+
+      @r_data = fdat[10..(10 + @r_len)]
+      @rsize = name_len + 10 + @r_len
+    end
+
+    def rsize
+      @rsize
+    end
+  end
+
+  class PacketParser
+    include NameUtil
+
+    def initialize(data)
+      @data = data
+      @data_orig = data
+      @header = nil
+      @question = nil
+    end
+
+    def header
+      if @header == nil
+        @header = Header.parse(@data)
+        @data = @data[@header.rsize..-1]
+      end
+      @header
+    end
+
+    def question
+      if @question == nil
+        header
+        @question = Question.parse(@data)
+        @data = @data[@question.rsize..-1]
+      end
+      @question
+    end
+
+    def next_resource
+      return nil if @data == nil || @data.size == 0
+      question
+      res = Resource.parse(@data)
+      @data = (res.rsize >= @data.size) ? nil : @data[res.rsize..-1]
+      res
+    end
+
+    def decomp_name(name)
+      dname_decode(name, @data_orig)
+    end
+
+    def data_to_s(res)
+      if res.r_class == DNS::CLASS_IN
+        case res.r_type
+        when DNS::TYPE_NS, DNS::TYPE_CNAME, DNS::TYPE_PTR
+          return dname_decode(res.r_data, @data_orig)
+        when DNS::TYPE_SOA
+          mdata = res.r_data
+          mname_len = dname_len(mdata)
+          mname = dname_decode(mdata, @data_orig)
+        
+          rdata = mdata[mname_len..-1]
+          rname_len = dname_len(rdata)
+          rname = dname_decode(rdata, @data_orig)
+
+          v = rdata[rname_len..-1].unpack('NNNNN')
+          return sprintf("%s %s ( %u %u %u %u %u )", mname, rname, *v)
+        when DNS::TYPE_MX
+          pref = res.r_data.unpack('n')[0]
+          xname = dname_decode(res.r_data[2..-1], @data_orig)          
+          return sprintf("%d %s", pref, xname)
+        end
+      end
+
+      result = ''
+      res.r_data.unpack('C*').each {|b| result += sprintf('%02x', b) }
+      "\\# #{res.r_data.size} " + result
+    end
+  end
+
+  class Query
+    def initialize(name, type)
+      @header = Header.new
+      @question = Question.new(name, type)
+      @packet = [ @header, @question ]
+    end
+
+    def to_s
+      @packet.map{|e| e.to_s }.join
+    end
+  end
+
+  class Response
+    def initialize(msg)
+      @parser = PacketParser.new(msg)
+    end
+
+    def each_resources
+      while (r = @parser.next_resource) != nil
+        name = @parser.decomp_name(r.r_name)
+        data = @parser.data_to_s(r)
+
+        clas_str = (r.r_class == DNS::CLASS_IN) ? 'IN' : "CLASS#{r.r_class}"
+        type_str = "TYPE#{r.r_type}" if (type_str = TYPE_STRING[r.r_type]) == nil
+
+        yield(name, clas_str, type_str, r.r_ttl, data)
+      end
+    end
+  end
+end
+
+class DNSSocket
+  def initialize(addr, port = DNS::PORT)
+    @tcp = TCPSocket.open(addr, port)
+  end
+
+  def send_query(name, type)
+    query = DNS::Query.new(name, type).to_s
+    @tcp.write([ query.size ].pack('n'))
+    @tcp.write(query)
+  end
+
+  def receive_response
+    len = @tcp.recv(2).unpack('n')[0]
+    return nil if len == nil
+
+    msg = @tcp.recv(len)
+    DNS::Response.new(msg)
+  end
+end
+
+addr = ARGV.shift
+zone = ARGV.shift
+
+if addr == nil || zone == nil
+  puts "usage: #{File.basename($0)} [master addr] [zone name]"
+  exit
+end
+
+s = DNSSocket.new(addr)
+s.send_query(zone, DNS::TYPE_AXFR)
+
+soa = false
+
+while (res = s.receive_response) != nil
+  res.each_resources do |name, klass, type, ttl, data|
+    soa = soa ? exit : true if type == "SOA"
+    puts "#{name}\t#{klass}\t#{type}\t#{ttl}\t#{data}"
+  end
+end
