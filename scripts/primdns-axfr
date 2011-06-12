@@ -306,6 +306,6 @@ soa = false
 while (res = s.receive_response) != nil
   res.each_resources do |name, klass, type, ttl, data|
     soa = soa ? exit : true if type == "SOA"
-    puts "#{name}\t#{klass}\t#{type}\t#{ttl}\t#{data}"
+    puts "#{name}\t#{ttl}\t#{klass}\t#{type}\t#{data}"
   end
 end
