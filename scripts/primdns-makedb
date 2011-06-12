@@ -589,6 +589,7 @@ class BindZone < BaseZone
     datafile = DataFile.new(hashsize)
 
     proc_source(srcname) do |r|
+#      STDERR.puts "DEBUG: #{r.inspect}" if $options[:debug]
       datafile.push_records(r)
     end
 
@@ -653,10 +654,10 @@ class BindZone < BaseZone
 
   def concat_tokens(tokens, lines)
     loop do
+      break if tokens.include?(')')
       break if (line = lines.shift) == nil
       t = split_line(line)
       tokens.concat(t)
-      break if t.include?(')')
     end
     tokens.delete('(')
     tokens.delete(')')
@@ -746,7 +747,7 @@ class BindZone < BaseZone
     case t
     when "IN";  return true
     when "CS", "CH", "HS"
-      raise "unsupported class"
+      raise "unsupported class: #{t}"
     end
     false
   end
