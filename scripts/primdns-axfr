@@ -162,7 +162,7 @@ module DNS
       fdat = res[name_len..-1]
       @r_type, @r_class, @r_ttl, @r_len = fdat.unpack('nnNn')
 
-      @r_data = fdat[10..(10 + @r_len)]
+      @r_data = fdat[10..(10 + @r_len - 1)]
       @rsize = name_len + 10 + @r_len
     end
 
