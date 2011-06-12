@@ -34,6 +34,39 @@ require 'optparse'
 FILE_MAGIC = 0x61727964   # "aryd"
 FILE_VERSION = 1
 
+DNS_CLASS_IN = 1
+
+DNS_TYPE_A = 1
+DNS_TYPE_NS = 2
+DNS_TYPE_CNAME = 5
+DNS_TYPE_SOA = 6
+DNS_TYPE_PTR = 12
+DNS_TYPE_MX = 15
+DNS_TYPE_TXT = 16
+DNS_TYPE_AAAA = 28
+
+DNS_TYPE_CODE = {
+  'A'     => DNS_TYPE_A,
+  'NS'    => DNS_TYPE_NS,
+  'CNAME' => DNS_TYPE_CNAME,
+  'SOA'   => DNS_TYPE_SOA,
+  'PTR'   => DNS_TYPE_PTR,
+  'MX'    => DNS_TYPE_MX,
+  'TXT'   => DNS_TYPE_TXT,
+  'AAAA'  => DNS_TYPE_AAAA,
+}
+
+def dns_type(type)
+  if (t = DNS_TYPE_CODE[type]) == nil
+    if type =~ /^TYPE(\d+)$/
+      return $1.to_i
+    else
+      return nil
+    end
+  end
+  t
+end
+
 def primish(n)
   n * n + n + 41
 end
@@ -113,7 +146,7 @@ class DataFile
   def push_records(records)
     records.each do |rec|
       index = hash_index(rec.r_name)
-      if rec.r_type == Record::DNS_TYPE_SOA
+      if rec.r_type == DNS_TYPE_SOA
         if @block[index].find_record(rec.r_name, rec.r_type)
           next   # SOA record duplicated - ignore it
         end
@@ -143,12 +176,12 @@ class DataFile
 
     io.pos = pos_hash
     @hashsize.times do |index|
-      io.write(hashtab[index].pack("NN"))
+      io.write(hashtab[index].pack('NN'))
     end
   end
 
   def header
-    [ FILE_MAGIC, 0, FILE_VERSION, @hashsize ].pack("NnnN")
+    [ FILE_MAGIC, 0, FILE_VERSION, @hashsize ].pack('NnnN')
   end
 
   def hash_index(name)
@@ -174,8 +207,8 @@ end
 class DataBlock
   def initialize
     @resindex = []
-    @name_buf = ""
-    @data_buf = ""
+    @name_buf = ''
+    @data_buf = ''
     @name_cache = {}
   end
 
@@ -266,27 +299,16 @@ class Record
   attr_reader :r_name, :r_ttl, :r_data
   attr_accessor :ri_name, :ri_data
 
-  DNS_CLASS_IN = 1
-
-  DNS_TYPE_A = 1
-  DNS_TYPE_NS = 2
-  DNS_TYPE_CNAME = 5
-  DNS_TYPE_SOA = 6
-  DNS_TYPE_PTR = 12
-  DNS_TYPE_MX = 15
-  DNS_TYPE_TXT = 16
-  DNS_TYPE_AAAA = 28
-
   def r_class
     DNS_CLASS_IN
   end
 
   def conv_dnsname(name)
-    result = ""
-    na = name.split(".")
+    result = ''
+    na = name.split('.')
     na.each do |np|
       len = np.size;
-      result += [ len ].pack("C")
+      result += [ len ].pack('C')
       result += np
     end
     result += "\0"
@@ -298,7 +320,20 @@ class Record
     data_len = self.r_data.size
 
     h = [ self.r_type.to_i, self.r_class.to_i, self.r_ttl.to_i, name_len, data_len, name_pos, data_pos ]
-    h.pack("nnNnnNN")
+    h.pack('nnNnnNN')
+  end
+end
+
+class RecordGeneric < Record
+  def initialize(name, type, data, ttl)
+    @r_name = name
+    @r_type = dns_type(type)
+    @r_data = data
+    @r_ttl = ttl
+  end
+
+  def r_type
+    @r_type
   end
 end
 
@@ -316,9 +351,9 @@ class RecordA < Record
   def conv_ipaddr(ipaddr_str)
     if ipaddr_str =~ /(\d+)\.(\d+)\.(\d+)\.(\d+)/
       a = [ $1.to_i, $2.to_i, $3.to_i, $4.to_i ]
-      return a.pack("CCCC")
+      return a.pack('CCCC')
     end
-    raise "invalid ip address"
+    raise 'invalid ip address'
   end
 end
 
@@ -358,10 +393,10 @@ class RecordSOA < Record
   end
 
   def conv_soa(mname, rname, serial, refresh, tretry, expire, minimum)
-    result = ""
+    result = ''
     result += conv_dnsname(mname)
     result += conv_dnsname(rname)
-    result += [ serial, refresh, tretry, expire, minimum ].pack("NNNNN")
+    result += [ serial, refresh, tretry, expire, minimum ].pack('NNNNN')
     result
   end
 end
@@ -381,7 +416,7 @@ class RecordPTR < Record
     if ipaddr_str =~ /(\d+)\.(\d+)\.(\d+)\.(\d+)/
       return "#{$4}.#{$3}.#{$2}.#{$1}.in-addr.arpa"
     end
-    raise "invalid ip address"
+    raise 'invalid ip address'
   end
 end
 
@@ -409,8 +444,8 @@ class RecordMX < Record
   end
 
   def conv_mx(pref, ename)
-    result = ""
-    result += [ pref ].pack("n")
+    result = ''
+    result += [ pref ].pack('n')
     result += conv_dnsname(ename)
     result
   end
@@ -428,8 +463,8 @@ class RecordTXT < Record
   end
 
   def conv_txt(txt)
-    raise "too long text" if txt.size > 255
-    [ txt.size ].pack("C") + txt
+    raise 'too long text' if txt.size > 255
+    [ txt.size ].pack('C') + txt
   end
 end
 
@@ -446,12 +481,12 @@ class RecordAAAA < Record
 
   def conv_ipaddr6(ipaddr6)
     t = ipaddr6.split(/(::)/)
-    t.delete("")
+    t.delete('')
 
-    u = t.map {|x| (x == "::") ? x : x.split(":") }.flatten
-    v = u.map {|x| (x == "::") ? ([ 0 ] * (8 - u.size + 1)) : x.hex }.flatten
+    u = t.map {|x| (x == '::') ? x : x.split(':') }.flatten
+    v = u.map {|x| (x == '::') ? ([ 0 ] * (8 - u.size + 1)) : x.hex }.flatten
 
-    v.pack("n8")
+    v.pack('n8')
   end
 end
 
@@ -478,7 +513,7 @@ class TinyZone < BaseZone
     end
 
     backup_db(dstname)
-    open(dstname, "w") do |io|
+    open(dstname, 'w') do |io|
       datafile.write_file(io)
     end
   end
@@ -498,7 +533,7 @@ class TinyZone < BaseZone
       io.each do |line|
         line.chomp!; next if line =~ /^\s*$/
         t = line[0].chr; line = line[1..-1]
-        params = line.split(":")
+        params = line.split(':')
         yield(t, params)
       end
     end
@@ -577,9 +612,20 @@ class TinyZone < BaseZone
 end
 
 class BindZone < BaseZone
+  MAKE_RECORD_METHOD = {
+    DNS_TYPE_A     => :make_record_a,
+    DNS_TYPE_NS    => :make_record_ns,
+    DNS_TYPE_CNAME => :make_record_cname,
+    DNS_TYPE_SOA   => :make_record_soa,
+    DNS_TYPE_PTR   => :make_record_ptr,
+    DNS_TYPE_MX    => :make_record_mx,
+    DNS_TYPE_TXT   => :make_record_txt,
+    DNS_TYPE_AAAA  => :make_record_aaaa,
+  }
+
   def initialize
-    @origin = ""
-    @last_name = ""
+    @origin = ''
+    @last_name = ''
     @ttl = 86400
   end
 
@@ -594,7 +640,7 @@ class BindZone < BaseZone
     end
 
     backup_db(dstname)
-    open(dstname, "w") do |io|
+    open(dstname, 'w') do |io|
       datafile.write_file(io)
     end
   end
@@ -675,7 +721,7 @@ class BindZone < BaseZone
         @last_name = @origin
       when '$TTL'
         @ttl = parse_ttl(tokens.shift)
-        raise "invalid ttl" if @ttl == nil
+        raise 'invalid ttl' if @ttl == nil
       else
         return [ parse_record(t, tokens) ]
       end
@@ -689,26 +735,20 @@ class BindZone < BaseZone
     r_ttl = @ttl
     r_name = (t != nil) ? t : @last_name
 
-    type_index = nil
-    tokens.each_with_index do |tok, index|
-      if is_type?(tok)
-        type_index = index
-      end
-    end
-
-    if type_index == nil
-      raise "invalid record format"
-    end
-
     loop do
       if (t = tokens.shift) == nil
-        raise "unexpected end of line"
+        raise 'unexpected end of line'
       end
+
+      next if is_class?(t)
+
+      if (x = parse_ttl(t)) != nil
+        r_ttl = x
+      end
+
       if is_type?(t)
         r_type = t
         break
-      elsif (x = parse_ttl(t)) != nil
-        r_ttl = x
       end
     end
 
@@ -721,7 +761,7 @@ class BindZone < BaseZone
     r = ttl_string.downcase
 
     loop do
-      return nil if r !~ /(\d+)([a-z]*)(.*)/
+      return nil if r !~ /^(\d+)([a-z]*)(.*)$/
       return nil if $1 == ''
 
       n = $1.to_i; m = $2; r = $3
@@ -745,8 +785,8 @@ class BindZone < BaseZone
   def is_class?(class_string)
     t = class_string.upcase
     case t
-    when "IN";  return true
-    when "CS", "CH", "HS"
+    when 'IN';  return true
+    when 'CS', 'CH', 'HS'
       raise "unsupported class: #{t}"
     end
     false
@@ -754,16 +794,7 @@ class BindZone < BaseZone
 
   def is_type?(class_string)
     t = class_string.upcase
-    case t
-    when "A";      return true
-    when "NS";     return true
-    when "CNAME";  return true
-    when "SOA";    return true
-    when "PTR";    return true
-    when "MX";     return true
-    when "TXT";    return true
-    when "AAAA";   return true
-    end
+    return true if dns_type(t) != nil
     false
   end
 
@@ -771,16 +802,18 @@ class BindZone < BaseZone
     t = type_string.upcase
     name = fqdn(name)
 
-    case t
-    when "A";      return make_record_a(name, ttl, tokens)
-    when "NS";     return make_record_ns(name, ttl, tokens)
-    when "CNAME";  return make_record_cname(name, ttl, tokens)
-    when "SOA";    return make_record_soa(name, ttl, tokens)
-    when "PTR";    return make_record_ptr(name, ttl, tokens)
-    when "MX";     return make_record_mx(name, ttl, tokens)
-    when "TXT";    return make_record_txt(name, ttl, tokens)
-    when "AAAA";   return make_record_aaaa(name, ttl, tokens)
+    if tokens[0] == '\#'
+      if (data = parse_generic_data(tokens)) == nil
+        raise "invaid data format"
+      end
+      return RecordGeneric.new(name, t, data, ttl)
+    else
+      method = MAKE_RECORD_METHOD[dns_type(t)]
+      if method != nil
+        return send(method, name, ttl, tokens)
+      end
     end
+    nil
   end
 
   def make_record_a(name, ttl, tokens)
@@ -844,6 +877,21 @@ class BindZone < BaseZone
       return "#{name}.#{@origin}"
     end
     name.gsub(/(.*)\.$/, '\1')
+  end
+
+  def parse_generic_data(tokens)
+    return nil if tokens[0] != '\#'
+    return nil if tokens[1] !~ /^\d+$/
+
+    tokens.shift
+    r_size = tokens.shift.to_i
+    r_data = ''
+
+    loop do
+      break if (t = tokens.shift) == nil
+      r_data += t.scan(/../).map {|b| b.hex }.pack('C*')
+    end
+    r_data
   end
 end
 
