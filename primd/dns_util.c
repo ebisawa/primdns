@@ -40,6 +40,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -360,6 +361,51 @@ dns_util_fexist(char *filename)
     struct stat sb;
 
     return (stat(filename, &sb) < 0) ? 0 : 1;
+}
+
+int
+dns_util_spawn(char *cmd, char **argv, int stdout)
+{
+    int status;
+    pid_t pchild, pgchild, rpid;
+
+    if ((pchild = fork()) < 0) {
+        plog_error(LOG_ERR, MODULE, "fork() failed");
+        return -1;
+    }
+
+    if (pchild == 0) {
+        /*
+         * child process:
+         * don't call log functions because these are not async-signal-safe.
+         */
+        if (stdout > 0 && dup2(stdout, 1) < 0)
+            exit(EXIT_FAILURE);
+        if ((pgchild = fork()) < 0)
+            exit(EXIT_FAILURE);
+
+        if (pgchild == 0) {
+            if (execvp(cmd, argv) < 0) {
+                plog(LOG_ERR, "%s: execvp() faild: %s", MODULE, cmd);
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        exit(EXIT_SUCCESS);
+    } else {
+        /* parent process */
+        if ((rpid = waitpid(pchild, &status, 0)) < 0) {
+            plog_error(LOG_ERR, MODULE, "%s: waitpid() faild");
+            return -1;
+        } else if (rpid == pchild) {
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                plog(LOG_ERR, "%s: exec() faild: %s", MODULE, cmd);
+                return -1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 unsigned

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,42 +27,10 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __DNS_SESSION_H__
-#define __DNS_SESSION_H__
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <semaphore.h>
-#include "dns.h"
-#include "dns_config.h"
-#include "dns_sock.h"
+#ifndef __DNS_AXFR_SLAVE_H__
+#define __DNS_AXFR_SLAVE_H__
+#include "dns_engine.h"
 
-typedef struct {
-    /* must be initialized by session_init() */
-    u_int16_t                 sess_msgid;
-    u_int16_t                 sess_flags;
-    u_int16_t                 sess_edns_version;
-    u_int16_t                 sess_edns_bufsize;
-    u_int32_t                 sess_extflags;
-    int                       sess_opcode;
-    dns_msg_question_t        sess_question;
-    void                     *sess_config;
-
-    /* may not be initialized by session_init() */
-    dns_config_zone_t        *sess_zone;
-
-    /* must not be destroyed by session_init() */
-    pthread_t                 sess_thread;
-    dns_tls_t                 sess_tls;
-} dns_session_t;
-
-int dns_session_init(void);
-int dns_session_start_thread(int threads);
-int dns_session_request(dns_sock_t *sock, int thread_id);
-int dns_session_check_config(void);
-
-void dns_session_printstats(int s);
+extern dns_engine_t AxfrEngine;
 
 #endif

@@ -53,12 +53,13 @@ static int notify_make_message(char *buf, int bufmax, char *zone_name);
 static int notify_sock_select(dns_sock_t *sock, int thread_id);
 static int notify_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-static void notify_sock_timeout(dns_sock_t *sock, char *zone_name);
+static void notify_sock_timeout(dns_sock_t *sock, void *zone_name);
 static void notify_log(dns_sock_t *sock, char *zone_name);
 
 static dns_sock_prop_t SockPropNotify = {
     DNS_SOCK_CHAR_NOTIFY, DNS_UDP_MSG_MAX,
-    notify_sock_select, notify_sock_recv, notify_sock_send, notify_sock_timeout,
+    notify_sock_select, notify_sock_recv,
+    notify_sock_send, notify_sock_timeout,
 };
 
 void
@@ -232,7 +233,7 @@ notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 }
 
 static void
-notify_sock_timeout(dns_sock_t *sock, char *zone_name)
+notify_sock_timeout(dns_sock_t *sock, void *zone_name)
 {
     plog(LOG_DEBUG, "%s: timeout event: fd = %d, retry = %d",
          MODULE, sock->sock_fd, sock->sock_timer.st_tocount);

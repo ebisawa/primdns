@@ -46,7 +46,7 @@ CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(sbindir)"
 PROGRAMS = $(sbin_PROGRAMS)
 am_primd_OBJECTS = dns_abq.$(OBJEXT) dns_acl.$(OBJEXT) \
-	dns_arc4random.$(OBJEXT) dns_babq.$(OBJEXT) \
+	dns_arc4random.$(OBJEXT) dns_axfr.$(OBJEXT) dns_babq.$(OBJEXT) \
 	dns_cache.$(OBJEXT) dns_config.$(OBJEXT) dns_control.$(OBJEXT) \
 	dns_data.$(OBJEXT) dns_engine.$(OBJEXT) dns_epoll.$(OBJEXT) \
 	dns_external.$(OBJEXT) dns_file.$(OBJEXT) \
@@ -156,14 +156,14 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-primd_SOURCES = dns_abq.c dns_acl.c dns_arc4random.c dns_babq.c \
-	dns_cache.c dns_config.c dns_control.c dns_data.c dns_engine.c \
-	dns_epoll.c dns_external.c dns_file.c dns_forward.c \
-	dns_kqueue.c dns_list.c dns_log.c dns_main.c dns_msg.c \
-	dns_notify.c dns_pool.c dns_proto.c dns_serverid.c \
+primd_SOURCES = dns_abq.c dns_acl.c dns_arc4random.c dns_axfr.c \
+	dns_babq.c dns_cache.c dns_config.c dns_control.c dns_data.c \
+	dns_engine.c dns_epoll.c dns_external.c dns_file.c \
+	dns_forward.c dns_kqueue.c dns_list.c dns_log.c dns_main.c \
+	dns_msg.c dns_notify.c dns_pool.c dns_proto.c dns_serverid.c \
 	dns_session.c dns_sock.c dns_util.c dns.h dns_abq.h dns_acl.h \
-	dns_arc4random.h dns_atomic.h dns_babq.h dns_cache.h \
-	dns_config.h dns_control.h dns_data.h dns_engine.h \
+	dns_arc4random.h dns_atomic.h dns_axfr.h dns_babq.h \
+	dns_cache.h dns_config.h dns_control.h dns_data.h dns_engine.h \
 	dns_external.h dns_file.h dns_forward.h dns_list.h dns_log.h \
 	dns_msg.h dns_notify.h dns_pool.h dns_proto.h dns_serverid.h \
 	dns_session.h dns_sock.h dns_util.h
@@ -251,6 +251,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_abq.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_acl.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_arc4random.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_axfr.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_babq.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_cache.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_config.Po@am__quote@

@@ -52,8 +52,9 @@ typedef struct {
     char        conf_cmdpath[PATH_MAX];
 } external_config_t;
 
-static int external_setarg(external_config_t *conf, char *arg);
-static int external_query(dns_cache_rrset_t *rrset, external_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
+static int external_setarg(dns_engine_param_t *ep, char *arg);
+static int external_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+
 static int external_popen(char *cmd, dns_msg_question_t *q);
 static int external_wait(int s, pid_t pid);
 static int external_read_response(dns_cache_rrset_t *rrset, int fd, dns_msg_question_t *q, dns_tls_t *tls);
@@ -79,11 +80,12 @@ static int (*ResParseFunc[])(dns_msg_resource_t *, char *) = {
 dns_engine_t ExternalEngine = {
     "external", sizeof(external_config_t),
     DNS_FLAG_AA,
-    (dns_engine_setarg_t *) external_setarg,
+    external_setarg,
     NULL,  /* init */
     NULL,  /* destroy */
-    (dns_engine_query_t *) external_query,
+    external_query,
     NULL,  /* dump */
+    NULL,  /* notify */
 };
 
 void
@@ -95,17 +97,20 @@ dns_external_printstats(int s)
 }
 
 static int
-external_setarg(external_config_t *conf, char *arg)
+external_setarg(dns_engine_param_t *ep, char *arg)
 {
+    external_config_t *conf = (external_config_t *) ep->ep_conf;
+
     STRLCPY(conf->conf_cmdpath, arg, sizeof(conf->conf_cmdpath));
 
     return 0;
 }
 
 static int
-external_query(dns_cache_rrset_t *rrset, external_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls)
+external_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
     int fd;
+    external_config_t *conf = (external_config_t *) ep->ep_conf;
 
     ATOMIC_INC(&ExternalStats.stat_queries);
 

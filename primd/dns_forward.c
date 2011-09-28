@@ -50,8 +50,9 @@ typedef struct {
     struct sockaddr_storage  conf_addr;
 } forward_config_t;
 
-static int forward_setarg(forward_config_t *conf, char *arg);
-static int forward_query(dns_cache_rrset_t *rrset, forward_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
+static int forward_setarg(dns_engine_param_t *ep, char *arg);
+static int forward_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+
 static int forward_connect(struct sockaddr *to, dns_tls_t *tls);
 static int forward_socket(struct sockaddr *to, dns_tls_t *tls);
 static int forward_send(int s, dns_msg_question_t *q, uint16_t msgid);
@@ -64,17 +65,19 @@ static int forward_validate_header(dns_header_t *header, uint16_t expid);
 dns_engine_t ForwardEngine = {
     "forward", sizeof(forward_config_t),
     0,
-    (dns_engine_setarg_t *) forward_setarg,
+    forward_setarg,
     NULL,  /* init */
     NULL,  /* destroy */
-    (dns_engine_query_t *) forward_query,
+    forward_query,
     NULL,  /* dump */
+    NULL,  /* notify */
 };
 
 static int
-forward_setarg(forward_config_t *conf, char *arg)
+forward_setarg(dns_engine_param_t *ep, char *arg)
 {
     struct sockaddr_storage ss;
+    forward_config_t *conf = (forward_config_t *) ep->ep_conf;
 
     if (dns_util_str2sa((SA *) &ss, arg, DNS_PORT) < 0)
         return -1;
@@ -85,11 +88,12 @@ forward_setarg(forward_config_t *conf, char *arg)
 }
 
 static int
-forward_query(dns_cache_rrset_t *rrset, forward_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls)
+forward_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
     int s;
     uint16_t msgid;
     struct sockaddr *to;
+    forward_config_t *conf = (forward_config_t *) ep->ep_conf;
     
     msgid = xarc4random(&tls->tls_arctx);
     to = (SA *) &conf->conf_addr;

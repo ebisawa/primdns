@@ -250,8 +250,7 @@ config_free_zone_engine(dns_config_zone_engine_t *ze)
     dns_engine_t *engine;
 
     engine = (dns_engine_t *) ze->ze_engine;
-    if (engine->eng_destroy != NULL)
-        engine->eng_destroy(ze->ze_econf);
+    dns_engine_destroy(engine, ze->ze_econf);
 
     free(ze->ze_econf);
     free(ze);
@@ -377,14 +376,11 @@ config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t
     if (config_get_token2(tok, CONFIG_TOKEN_SEMICOLON, ctx) < 0)
         return -1;
 
-    /* XXX */
-    if (engine->eng_init != NULL) {
-        if (engine->eng_init(econf) < 0) {
-            config_error("query engine initialization failed", NULL, ctx);
-            free(econf);
-            free(ze);
-            return -1;
-        }
+    if (dns_engine_init(engine, econf) < 0) {
+        config_error("query engine initialization failed", NULL, ctx);
+        free(econf);
+        free(ze);
+        return -1;
     }
 
     ze->ze_engine = engine;
@@ -430,12 +426,9 @@ config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_c
         return 0;
     }
 
-    /* XXX */
-    if (engine->eng_setarg != NULL) {
-        if (engine->eng_setarg(econf, tok.tok_string) < 0) {
-            config_error("invalid parameter", &tok, ctx);
-            return -1;
-        }
+    if (dns_engine_setarg(engine, econf, tok.tok_string) < 0) {
+        config_error("invalid parameter", &tok, ctx);
+        return -1;
     }
 
     return 0;
@@ -571,44 +564,3 @@ config_error(char *msg, config_token_t *token, config_context_t *ctx)
              MODULE, ctx->ctx_handle.fh_line, token->tok_string, msg);
     }
 }
-
-
-#if 0
-
-static void *
-config_parse_int(void *dest, char *tstring, config_context_t *ctx)
-{
-    config_token_t tok;
-
-    if (dest == NULL)
-        return NULL;
-
-    if (config_get_token2(&tok, CONFIG_TOKEN_STRING, ctx) < 0)
-        return NULL;
-
-    *((int *) dest) = atoi(tok.tok_string);
-
-    return dest;
-}
-
-static void *
-config_parse_string(void *dest, char *tstring, config_context_t *ctx)
-{
-    config_token_t tok;
-
-    if (dest == NULL)
-        return NULL;
-
-    if (config_get_token2(&tok, CONFIG_TOKEN_STRING, ctx) < 0)
-        return NULL;
-    if (strlen(tok.tok_string) >= CONFIG_STRING_MAX) {
-        config_error("string too long", &tok, ctx);
-        return NULL;
-    }
-
-    strcpy(dest, tok.tok_string);
-
-    return dest;
-}
-
-#endif

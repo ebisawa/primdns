@@ -97,11 +97,11 @@ typedef struct {
 
 #define INVALID_PTR(conf, p)   ((void *)(p) < (void *)(conf)->conf_data || (void *)(p) >= (void *)((conf)->conf_data + (conf)->conf_datasize))
 
-static int data_setarg(data_config_t *conf, char *arg);
-static int data_init(data_config_t *conf);
-static int data_destroy(data_config_t *conf);
-static int data_query(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
-static int data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *edump);
+static int data_setarg(dns_engine_param_t *ep, char *arg);
+static int data_init(dns_engine_param_t *ep);
+static int data_destroy(dns_engine_param_t *ep);
+static int data_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+static int data_dumpnext(dns_engine_param_t *ep, dns_msg_resource_t *res, dns_engine_dump_t *edump);
 
 static int data_validate(data_header_t *header);
 static int data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
@@ -123,11 +123,12 @@ static data_stats_t DataStats;
 dns_engine_t DataEngine = {
     "data", sizeof(data_config_t),
     DNS_FLAG_AA,
-    (dns_engine_setarg_t *)    data_setarg,
-    (dns_engine_init_t *)      data_init,
-    (dns_engine_destroy_t *)   data_destroy,
-    (dns_engine_query_t *)     data_query,
-    (dns_engine_dumpnext_t *)  data_dumpnext,
+    data_setarg,
+    data_init,
+    data_destroy,
+    data_query,
+    data_dumpnext,
+    NULL,  /* notify */
 };
 
 void
@@ -143,8 +144,10 @@ dns_data_printstats(int s)
 }
 
 static int
-data_setarg(data_config_t *conf, char *arg)
+data_setarg(dns_engine_param_t *ep, char *arg)
 {
+    data_config_t *conf = (data_config_t *) ep->ep_conf;
+
     if (arg[0] == '/')
         STRLCPY(conf->conf_filename, arg, sizeof(conf->conf_filename));
     else
@@ -154,17 +157,20 @@ data_setarg(data_config_t *conf, char *arg)
 }
 
 static int
-data_init(data_config_t *conf)
+data_init(dns_engine_param_t *ep)
 {
     int fd;
     void *p;
     off_t size;
     data_header_t *header;
+    data_config_t *conf = (data_config_t *) ep->ep_conf;
 
     plog(LOG_DEBUG, "%s: file = %s", MODULE, conf->conf_filename);
 
-    if ((fd = open(conf->conf_filename, O_RDONLY)) < 0)
-        return 0;
+    if ((fd = open(conf->conf_filename, O_RDONLY)) < 0) {
+        plog(LOG_ERR, "%s: can't open: %s", MODULE, conf->conf_filename);
+        return -1;
+    }
 
     size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
@@ -195,8 +201,10 @@ data_init(data_config_t *conf)
 }
 
 static int
-data_destroy(data_config_t *conf)
+data_destroy(dns_engine_param_t *ep)
 {
+    data_config_t *conf = (data_config_t *) ep->ep_conf;
+
     munmap(conf->conf_data, conf->conf_datasize);
     close(conf->conf_fd);
     memset(conf, 0, sizeof(*conf));
@@ -205,9 +213,10 @@ data_destroy(data_config_t *conf)
 }
 
 static int
-data_query(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls)
+data_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
     int count;
+    data_config_t *conf = (data_config_t *) ep->ep_conf;
 
     ATOMIC_INC(&DataStats.stat_queries);
 
@@ -224,10 +233,11 @@ data_query(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q,
 }
 
 static int
-data_dumpnext(dns_msg_resource_t *res, data_config_t *conf, dns_engine_dump_t *edump)
+data_dumpnext(dns_engine_param_t *ep, dns_msg_resource_t *res, dns_engine_dump_t *edump)
 {
     data_hash_t *hash;
     data_record_t *record, *p;
+    data_config_t *conf = (data_config_t *) ep->ep_conf;
     data_pos_t *dpos = (data_pos_t *) edump->ed_data;
 
     if (sizeof(edump->ed_data) < sizeof(data_pos_t)) {

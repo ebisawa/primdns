@@ -38,7 +38,8 @@
 
 #define MODULE "serverid"
 
-static int serverid_query(dns_cache_rrset_t *rrset, void *conf, dns_msg_question_t *q, dns_tls_t *tls);
+static int serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+
 static int serverid_hostname(dns_cache_rrset_t *rrset, char *qname, dns_tls_t *tls);
 static int serverid_version(dns_cache_rrset_t *rrset, char *qname, dns_tls_t *tls);
 static int serverid_txt_record(dns_cache_rrset_t *rrset, char *qname, char *txt_string, dns_tls_t *tls);
@@ -49,12 +50,13 @@ dns_engine_t ServerIdEngine = {
     NULL,  /* setrg */
     NULL,  /* init */
     NULL,  /* destroy */
-    (dns_engine_query_t *) serverid_query,
+    serverid_query,
     NULL,  /* dump */
+    NULL,  /* notify */
 };
 
 static int
-serverid_query(dns_cache_rrset_t *rrset, void *conf, dns_msg_question_t *q, dns_tls_t *tls)
+serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
     if (q->mq_class != DNS_CLASS_CH || q->mq_type != DNS_TYPE_TXT)
         return -1;
@@ -107,7 +109,7 @@ serverid_txt_record(dns_cache_rrset_t *rrset, char *qname, char *txt_string, dns
 
     res.mr_datalen = len + 1;
     res.mr_data[0] = len;
-    STRLCPY(&res.mr_data[1], txt_string, sizeof(res.mr_data) - 1);
+    STRLCPY((char *) &res.mr_data[1], txt_string, sizeof(res.mr_data) - 1);
 
     if (dns_cache_add_answer(rrset, &res, tls) < 0) {
         plog(LOG_ERR, "%s: can't add cache resource", MODULE);

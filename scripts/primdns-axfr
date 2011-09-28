@@ -295,12 +295,11 @@ zone = ARGV.shift
 
 if addr == nil || zone == nil
   puts "usage: #{File.basename($0)} [master addr] [zone name]"
-  exit
+  abort
 end
 
 s = DNSSocket.new(addr)
 s.send_query(zone, DNS::TYPE_AXFR)
-
 soa = false
 
 while (res = s.receive_response) != nil

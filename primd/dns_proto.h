@@ -49,7 +49,7 @@ typedef struct {
 } __attribute__((packed)) dns_header_t;
 
 #define DNS_OP2FLAG(op)    (((op) & 0x000f) << 11)
-#define DNS_OPCODE(flag)   (((flag) & 0x4800) >> 11)
+#define DNS_OPCODE(flag)   (((flag) & 0x7800) >> 11)
 #define DNS_RCODE(flag)    (((flag) & 0x000f))
 
 #define DNS_OP_QUERY                0

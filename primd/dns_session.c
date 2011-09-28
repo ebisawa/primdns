@@ -80,8 +80,10 @@ static void session_destroy(dns_session_t *session, dns_sock_buf_t *sbuf);
 static void session_proc(dns_session_t *session, int nonblock);
 static int session_request_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf);
-static int session_request_normal(dns_session_t *session, dns_sock_buf_t *sbuf);
-static int session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_request_query(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_request_query_normal(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_request_query_axfr(dns_session_t *session, dns_sock_buf_t *sbuf);
+static int session_request_notify(dns_session_t *session, dns_sock_buf_t *sbuf);
 static int session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf);
 static int session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, dns_msg_handle_t *handle);
 static int session_check_question_header(dns_header_t *header);
@@ -89,7 +91,7 @@ static dns_cache_rrset_t *session_query_answer(dns_session_t *session, dns_sock_
 static dns_cache_rrset_t *session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset);
 static dns_cache_rrset_t *session_query_recursive(dns_session_t *session, dns_msg_question_t *q, int nlevel);
 static dns_cache_rrset_t *session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type);
-static dns_cache_rrset_t *session_query_internal(dns_session_t *session, dns_msg_question_t *q, int need_flags);
+static dns_cache_rrset_t *session_query_internal(dns_session_t *session, dns_msg_question_t *q);
 static int session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type);
 static void session_resolve_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel);
 static void session_send_response(dns_sock_buf_t *sbuf);
@@ -293,6 +295,7 @@ session_init(dns_session_t *session, uint16_t msgid, uint16_t flags)
     session->sess_edns_version = 0;
     session->sess_edns_bufsize = 0;
     session->sess_extflags = 0;
+    session->sess_opcode = 0;
 
     memset(&session->sess_question, 0, sizeof(session->sess_question));
     session->sess_config = ConfigRoot;
@@ -355,23 +358,22 @@ session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf)
         goto error;
     }
 
-    if (!DNS_TYPE_QMETA(q->mq_type) || q->mq_type == DNS_TYPE_ALL)
-        rcode = session_request_normal(session, sbuf);
-    else {
-        switch (q->mq_type) {
-        case DNS_TYPE_AXFR:
-            rcode = session_request_axfr(session, sbuf);
-            break;
-        default:
-            rcode = DNS_RCODE_NOTIMP;
-            break;
-        }
+    plog(LOG_DEBUG, "%s: opcode = %d", MODULE, session->sess_opcode);
+
+    switch (session->sess_opcode) {
+    case DNS_OP_QUERY:
+        if ((rcode = session_request_query(session, sbuf)) != DNS_RCODE_NOERROR)
+            goto error;
+        break;
+
+    case DNS_OP_NOTIFY:
+        if ((rcode = session_request_notify(session, sbuf)) != DNS_RCODE_NOERROR)
+            goto error;
+        break;
     }
 
-    if (rcode == DNS_RCODE_NOERROR)
-        return 0;
+    return 0;
 
-    /* fall through */
 error:
     if (rcode > 0 && session_make_error(sbuf, session, rcode) >= 0)
         session_send_response(sbuf);
@@ -379,12 +381,35 @@ error:
         session_send_finish(sbuf);
 
     ATOMIC_INC(&SessionStats.stat_error);
-
     return -1;
 }
 
 static int
-session_request_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
+session_request_query(dns_session_t *session, dns_sock_buf_t *sbuf)
+{
+    int rcode;
+    dns_msg_question_t *q;
+
+    q = &session->sess_question;
+
+    if (!DNS_TYPE_QMETA(q->mq_type) || q->mq_type == DNS_TYPE_ALL)
+        rcode = session_request_query_normal(session, sbuf);
+    else {
+        switch (q->mq_type) {
+        case DNS_TYPE_AXFR:
+            rcode = session_request_query_axfr(session, sbuf);
+            break;
+        default:
+            rcode = DNS_RCODE_NOTIMP;
+            break;
+        }
+    }
+
+    return rcode;
+}
+
+static int
+session_request_query_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     dns_cache_rrset_t *rrset;
 
@@ -404,7 +429,7 @@ session_request_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
 }
 
 static int
-session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
+session_request_query_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     int r;
     char from[64];
@@ -446,9 +471,18 @@ session_request_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
 }
 
 static int
+session_request_notify(dns_session_t *session, dns_sock_buf_t *sbuf)
+{
+    if (dns_engine_notify(session->sess_zone) < 0)
+        return -1;
+
+    return DNS_RCODE_NOERROR;
+}
+
+static int
 session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
-    uint16_t msgid, flags, arcount;
+    uint16_t msgid, flags, qdcount, arcount;
     dns_header_t header;
     dns_msg_handle_t handle;
     dns_msg_question_t question;
@@ -465,24 +499,26 @@ session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
 
     msgid = ntohs(header.hdr_id);
     flags = ntohs(header.hdr_flags);
+    qdcount = ntohs(header.hdr_qdcount);
     arcount = ntohs(header.hdr_arcount);
+
     session_init(session, msgid, flags);
+    session->sess_opcode = DNS_OPCODE(flags);
 
     /* error response can be sent after session_init() */
-    if (DNS_OPCODE(flags) != DNS_OP_QUERY)
-        return DNS_RCODE_NOTIMP;
     if (session_check_question_header(&header) < 0)
         return DNS_RCODE_FORMERR;
-    if (dns_msg_read_question(&question, &handle) < 0)
-        return DNS_RCODE_FORMERR;
 
-    plog_query(LOG_INFO, &question, (SA *) &sbuf->sb_remote, sbuf->sb_sock->sock_prop->sp_char);
-    memcpy(&session->sess_question, &question, sizeof(question));
-
-    if (arcount == 1) {
-        if (session_read_edns_opt(session, sbuf, &handle) < 0)
+    if (qdcount > 0) {
+        if (dns_msg_read_question(&question, &handle) < 0)
             return DNS_RCODE_FORMERR;
+
+        plog_query(LOG_INFO, &question, (SA *) &sbuf->sb_remote, sbuf->sb_sock->sock_prop->sp_char);
+        memcpy(&session->sess_question, &question, sizeof(question));
     }
+
+    if (arcount == 1 && session_read_edns_opt(session, sbuf, &handle) < 0)
+        return DNS_RCODE_FORMERR;
 
     dns_msg_read_close(&handle);
     return DNS_RCODE_NOERROR;
@@ -570,7 +606,7 @@ session_query_recursive(dns_session_t *session, dns_msg_question_t *q, int nleve
 {
     dns_cache_rrset_t *rrset;
 
-    if ((rrset = dns_engine_query(q, session->sess_zone, 0, &session->sess_tls)) != NULL) {
+    if ((rrset = dns_engine_query(q, session->sess_zone, &session->sess_tls)) != NULL) {
         if (dns_list_count(&rrset->rrset_list_cname) > 0 &&
             dns_list_count(&rrset->rrset_list_answer) == 0) {
             session_resolve_cname(session, q, rrset, nlevel + 1);
@@ -589,18 +625,18 @@ session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type)
     q_ns.mq_type = type;
     q_ns.mq_class = q->mq_class;
 
-    return session_query_internal(session, &q_ns, DNS_FLAG_AA);
+    return session_query_internal(session, &q_ns);
 }
 
 static dns_cache_rrset_t *
-session_query_internal(dns_session_t *session, dns_msg_question_t *q, int need_flags)
+session_query_internal(dns_session_t *session, dns_msg_question_t *q)
 {
     dns_cache_rrset_t *rrset;
 
     plog(LOG_DEBUG, "%s: internal query: %s %s", MODULE, q->mq_name, dns_proto_type_string(q->mq_type));
 
     if ((rrset = dns_cache_lookup(q, DNS_CACHE_INTERNAL, &session->sess_tls)) == NULL) {
-        if ((rrset = dns_engine_query(q, session->sess_zone, need_flags, &session->sess_tls)) == NULL)
+        if ((rrset = dns_engine_query(q, session->sess_zone, &session->sess_tls)) == NULL)
             return NULL;
 
         dns_cache_register(rrset, DNS_CACHE_INTERNAL, &session->sess_tls);
@@ -696,7 +732,7 @@ session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource
     if (session_send_axfr_resource(sbuf, session, soa) < 0)
         return DNS_RCODE_SERVFAIL;
 
-    if (dns_engine_dump_open(&edump, session->sess_zone) < 0)
+    if (dns_engine_dump_init(&edump, session->sess_zone) < 0)
         return DNS_RCODE_SERVFAIL;
 
     while (dns_engine_dump_next(&res, &edump) >= 0) {
@@ -705,8 +741,6 @@ session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource
         if (session_send_axfr_resource(sbuf, session, &res) < 0)
             return DNS_RCODE_SERVFAIL;
     }
-
-    dns_engine_dump_close(&edump);
 
     if (session_send_axfr_resource(sbuf, session, soa) < 0)
         return DNS_RCODE_SERVFAIL;
@@ -927,7 +961,7 @@ session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns
             if (session_compare_question(q, &q_a) == 0)
                 return;
 
-            if ((rrset = session_query_internal(session, &q_a, 0)) != NULL) {
+            if ((rrset = session_query_internal(session, &q_a)) != NULL) {
                 if (dns_list_count(&rrset->rrset_list_cname) == 0) {
                     ca_a = DNS_CACHE_LIST_HEAD(&rrset->rrset_list_answer);
                     while (ca_a != NULL) {
