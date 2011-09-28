@@ -502,12 +502,12 @@ end
 class TinyZone < BaseZone
   DEFAULT_TTL = 86400
 
-  def makedb(dstname, srcname)
-    count = count_records(srcname)
+  def makedb(dstname, lines)
+    count = count_records(lines)
     hashsize = get_hashsize(count)
     datafile = DataFile.new(hashsize)
 
-    proc_source(srcname) do |t, params|
+    proc_source(lines) do |t, params|
       r = make_record(t, params)
       datafile.push_records(r) if r != nil
     end
@@ -519,23 +519,21 @@ class TinyZone < BaseZone
   end
 
   private
-  def count_records(srcname)
+  def count_records(lines)
     count = 0
-    proc_source(srcname) do |t, params|
+    proc_source(lines) do |t, params|
       r = make_record(t, params)
       count += r.size if r != nil
     end
     count
   end
 
-  def proc_source(srcname)
-    open(srcname) do |io|
-      io.each do |line|
-        line.chomp!; next if line =~ /^\s*$/
-        t = line[0].chr; line = line[1..-1]
-        params = line.split(':')
-        yield(t, params)
-      end
+  def proc_source(lines)
+    lines.each do |line|
+      line.chomp!; next if line =~ /^\s*$/
+      t = line[0].chr; line = line[1..-1]
+      params = line.split(':')
+      yield(t, params)
     end
   end
 
@@ -629,12 +627,12 @@ class BindZone < BaseZone
     @ttl = 86400
   end
 
-  def makedb(dstname, srcname)
-    count = count_records(srcname)
+  def makedb(dstname, lines)
+    count = count_records(lines)
     hashsize = get_hashsize(count)
     datafile = DataFile.new(hashsize)
 
-    proc_source(srcname) do |r|
+    proc_source(lines) do |r|
 #      STDERR.puts "DEBUG: #{r.inspect}" if $options[:debug]
       datafile.push_records(r)
     end
@@ -646,17 +644,8 @@ class BindZone < BaseZone
   end
 
   private
-  def proc_source(srcname)
-    lines = []
-    open(srcname) do |io|
-      io.each do |line|
-        line.chomp!
-        line.gsub!(/;.*$/, '')
-        line.gsub!(/\s+$/, '')
-        next if line =~ /^\s*$/
-        lines.push(line)
-      end
-    end
+  def proc_source(lines)
+    lines = preproc_source(lines)
 
     loop do
       break if (line = lines.shift) == nil
@@ -670,6 +659,18 @@ class BindZone < BaseZone
       r = proc_line(tokens, blank_name)
       yield(r) if r != nil
     end
+  end
+
+  def preproc_source(lines)
+    result = []
+    lines.each do |line|
+      line.chomp!
+      line.gsub!(/;.*$/, '')
+      line.gsub!(/\s+$/, '')
+      next if line =~ /^\s*$/
+      result << line
+    end
+    result
   end
 
   def split_line(line)
@@ -907,14 +908,20 @@ ARGV.options do |opt|
   opt.banner = $banner
   opt.on('-d', 'debug')                 {|v| $options[:debug] = v }
   opt.on('-t', 'tiny-style zone file')  {|v| $options[:tinyzone] = v }
+  opt.on('--stdin')                     {|v| $options[:stdin] = v }
   opt.parse!
 end
 
-src = ARGV.shift
+src = $options[:stdin] ? nil : ARGV.shift
 dst = ARGV.shift
 
-usage if src == nil || dst == nil
-usage if !File.exist?(src)
+usage if dst == nil
+usage if src != nil && !File.exist?(src)
+
+def getsource(src)
+  io = (src != nil) ? open(src) : STDIN
+  io.readlines
+end
 
 if $options[:tinyzone]
   converter = TinyZone.new
@@ -922,4 +929,5 @@ else
   converter = BindZone.new
 end
 
-converter.makedb(dst, src)
+lines = getsource(src)
+converter.makedb(dst, lines)
