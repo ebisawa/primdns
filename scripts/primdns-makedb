@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 #
-#  Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+#  Copyright (c) 2010, 2011 Satoshi Ebisawa. All rights reserved.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -98,7 +98,7 @@ end
 #     !                                                               !
 #     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #     !                                                               !
-#     ~                           Data Blocks                        ~
+#     ~                           Data Blocks                         ~
 #     !                                                               !
 #     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #
@@ -906,9 +906,9 @@ end
 
 ARGV.options do |opt|
   opt.banner = $banner
-  opt.on('-d', 'debug')                 {|v| $options[:debug] = v }
-  opt.on('-t', 'tiny-style zone file')  {|v| $options[:tinyzone] = v }
-  opt.on('--stdin')                     {|v| $options[:stdin] = v }
+  opt.on('-d',      'debug')                   {|v| $options[:debug] = v }
+  opt.on('-t',      'tiny-style zone file')    {|v| $options[:tinyzone] = v }
+  opt.on('--stdin', 'read source from stdin')  {|v| $options[:stdin] = v }
   opt.parse!
 end
 
