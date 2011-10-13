@@ -290,12 +290,27 @@ class DNSSocket
   end
 end
 
+$options = {}
+$banner = "usage: #{File.basename($0)} [options] [master addr] [zone name]\n"
+
+def usage
+  puts $banner
+  abort
+end
+
+ARGV.options do |opt|
+  opt.banner = $banner
+  opt.on('-m FILENAME', 'makedb')  {|v| $options[:makedb] = v }
+  opt.parse!
+end
+
+outio = STDOUT
 addr = ARGV.shift
 zone = ARGV.shift
+usage if addr == nil || zone == nil
 
-if addr == nil || zone == nil
-  puts "usage: #{File.basename($0)} [master addr] [zone name]"
-  abort
+if $options[:makedb] != nil
+  outio = IO.popen("primdns-makedb --stdin #{$options[:makedb]}", 'w')
 end
 
 s = DNSSocket.new(addr)
@@ -304,7 +319,7 @@ soa = false
 
 while (res = s.receive_response) != nil
   res.each_resources do |name, klass, type, ttl, data|
-    soa = soa ? exit : true if type == "SOA"
-    puts "#{name}\t#{ttl}\t#{klass}\t#{type}\t#{data}"
+    soa = soa ? exit : true if type == 'SOA'
+    outio.puts "#{name}\t#{ttl}\t#{klass}\t#{type}\t#{data}"
   end
 end
