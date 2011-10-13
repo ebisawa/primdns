@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include "dns.h"
 #include "dns_cache.h"
 #include "dns_data.h"
@@ -48,22 +49,21 @@ typedef struct {
 } axfr_config_t;
 
 static int axfr_setarg(dns_engine_param_t *ep, char *arg);
-static int axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+static int axfr_init(dns_engine_param_t *ep);
 static int axfr_destroy(dns_engine_param_t *ep);
+static int axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
 static int axfr_notify(dns_engine_param_t *ep);
+static int axfr_exec_receiver(char *master_addr, char *zone_name, char *datname);
+static int axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datname);
+static void axfr_dataname(char *buf, int bufsize, char *zone_name);
 
-static void axfr_exec_receiver(char *master_addr, char *zone_name, int out_fd);
-static void axfr_exec_makedb(char *dstname, char *srcname);
-static int axfr_init_data_engine(axfr_config_t *conf, char *datname);
-
-static char *AxfrCmdTransfer = "primdns-axfr";
-static char *AxfrCmdMakeData = "primdns-makedb";
+static char *PrimAxfr = "primdns-axfr";
 
 dns_engine_t AxfrEngine = {
     "axfr", sizeof(axfr_config_t),
     DNS_FLAG_AA,
     axfr_setarg,
-    NULL,  /* init */
+    axfr_init,
     axfr_destroy,
     axfr_query,
     NULL,  /* dump */
@@ -79,8 +79,20 @@ axfr_setarg(dns_engine_param_t *ep, char *arg)
 }
 
 static int
-axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
+axfr_init(dns_engine_param_t *ep)
 {
+    char buf[256];
+    axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
+
+    axfr_dataname(buf, sizeof(buf), ep->ep_zone->z_name);
+    if (axfr_init_data_engine(ep->ep_zone, conf, buf) < 0) {
+        plog(LOG_ERR, "%s: axfr_init_data_engine() failed", MODULE);
+        return -1;
+    }
+
+    /* XXX check SOA record */
+
+
     return 0;
 }
 
@@ -98,81 +110,87 @@ axfr_destroy(dns_engine_param_t *ep)
 }
 
 static int
-axfr_notify(dns_engine_param_t *ep)
+axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
-    int out_fd;
-    char maddr[256], temp[256], datname[256];
+    dns_engine_param_t data_param;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
-    /* XXX validate notification */
+    if (conf->ac_dataconf == NULL)
+        return -1;
 
+    data_param.ep_zone = ep->ep_zone;
+    data_param.ep_conf = conf->ac_dataconf;
 
+    return DataEngine.eng_query(&data_param, rrset, q, tls);
+}
+
+static int
+axfr_notify(dns_engine_param_t *ep)
+{
+    char maddr[256], datname[256];
+    axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
+
+    /* XXX validate notification, from valid master server? */
     plog(LOG_DEBUG, "%s: XXX notify", __func__);
 
 
+    /* XXX SOA check */
 
-    /* XXX destroy current dataconf */
-    if (conf->ac_dataconf != NULL) {
-        dns_engine_destroy(&DataEngine, conf->ac_dataconf);
-        free(conf->ac_dataconf);
-    }
+
 
     dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
-    snprintf(temp, sizeof(temp), "%s/axfr_%s_%s_XXXXXX.temp", ConfDir, ep->ep_zone->z_name, maddr);
+    axfr_dataname(datname, sizeof(datname), ep->ep_zone->z_name);
 
-    out_fd = mkstemp(temp);
-    snprintf(datname, sizeof(datname), "%s.dat", temp);
-    axfr_exec_receiver(maddr, ep->ep_zone->z_name, out_fd);
-    axfr_exec_makedb(datname, temp);
-    close(out_fd);
-
-    axfr_init_data_engine(conf, datname);
+    if (axfr_exec_receiver(maddr, ep->ep_zone->z_name, datname) < 0) {
+        plog(LOG_ERR, "%s: axfr_exec_receiver() failed", MODULE);
+        unlink(datname);
+        return -1;
+    }
 
     return 0;
 }
 
-static void
-axfr_exec_receiver(char *master_addr, char *zone_name, int out_fd)
+static int
+axfr_exec_receiver(char *master_addr, char *zone_name, char *datname)
 {
-    char *argv[] = { AxfrCmdTransfer, master_addr, zone_name, NULL };
+    char *argv[] = { PrimAxfr, "-m", datname, master_addr, zone_name, NULL };
 
-    dns_util_spawn(AxfrCmdTransfer, argv, out_fd);
-}
-
-static void
-axfr_exec_makedb(char *dstname, char *srcname)
-{
-    char *argv[] = { AxfrCmdMakeData, srcname, dstname, NULL };
-
-    dns_util_spawn(AxfrCmdMakeData, argv, -1);
+    return dns_util_spawn(PrimAxfr, argv, -1);
 }
 
 static int
-axfr_init_data_engine(axfr_config_t *conf, char *datname)
+axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datname)
 {
     void *dataconf;
+    struct stat sb;
     dns_engine_t *engine = &DataEngine;
+
+    if (stat(datname, &sb) < 0)
+        return 0;
 
     if ((dataconf = calloc(1, engine->eng_conflen)) == NULL) {
         plog(LOG_ERR, "%s: insufficient memory", MODULE);
         return -1;
     }
 
-    if (dns_engine_setarg(engine, dataconf, datname) < 0) {
+    if (dns_engine_setarg(engine, zone, dataconf, datname) < 0) {
         plog(LOG_ERR, "%s: dns_engine_setarg() failed", MODULE);
         free(dataconf);
         return -1;
     }
 
-    if (dns_engine_init(engine, dataconf) < 0) {
+    if (dns_engine_init(engine, zone, dataconf) < 0) {
         plog(LOG_ERR, "%s: dns_engine_init() failed", MODULE);
         free(dataconf);
         return -1;
     }
 
-    plog(LOG_DEBUG, "%s: XXX datname = %s", __func__, datname);
-
     conf->ac_dataconf = dataconf;
-
     return 0;
+}
+
+static void
+axfr_dataname(char *buf, int bufsize, char *zone_name)
+{
+    snprintf(buf, bufsize, "%s/.axfr_%s.dat", ConfDir, zone_name);
 }

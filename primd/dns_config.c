@@ -72,7 +72,7 @@ typedef struct {
 } config_context_t;
 
 typedef int (config_parse_head_t)(void *config, config_context_t *ctx);
-typedef int (config_parse_body_t)(void *config, config_context_t *ctx, config_token_t *tok);
+typedef int (config_parse_body_t)(void *config, config_context_t *ctx, config_token_t *tok, void *param);
 
 static dns_config_root_t *config_read(char *filename);
 static void config_wait_update(void);
@@ -84,11 +84,11 @@ static void config_free_zone_engine(dns_config_zone_engine_t *ze);
 static int config_parse_root(dns_config_root_t *root, config_context_t *ctx);
 static int config_parse_zone_head(dns_config_zone_t *zone, config_context_t *ctx);
 static int config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_token_t *tok);
-static int config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t *ctx, config_token_t *tok);
-static int config_parse_zone_slaves_body(dns_config_zone_slaves_t *slaves, config_context_t *ctx, config_token_t *tok);
-static int config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_context_t *ctx, dns_engine_t *engine, void *econf);
-static int config_parse_clause(void *config, config_context_t *ctx, config_parse_head_t *parse_head, config_parse_body_t *parse_body);
-static int config_parse_clause_body(void *config, config_context_t *ctx, config_parse_body_t *parse_body);
+static int config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t *ctx, config_token_t *tok, dns_config_zone_t *zone);
+static int config_parse_zone_slaves_body(dns_config_zone_slaves_t *slaves, config_context_t *ctx, config_token_t *tok, dns_config_zone_t *zone);
+static int config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_context_t *ctx, dns_engine_t *engine, dns_config_zone_t *zone, void *econf);
+static int config_parse_clause(void *config, config_context_t *ctx, config_parse_head_t *parse_head, config_parse_body_t *parse_body, void *param);
+static int config_parse_clause_body(void *config, config_context_t *ctx, config_parse_body_t *parse_body, void *param);
 static int config_get_token(config_token_t *token, config_context_t *ctx);
 static int config_get_token2(config_token_t *token, int code, config_context_t *ctx);
 static void config_unget_token(config_token_t *token, config_context_t *ctx);
@@ -283,7 +283,8 @@ config_parse_root(dns_config_root_t *root, config_context_t *ctx)
 
             if (config_parse_clause(zone, ctx,
                                     (config_parse_head_t *) config_parse_zone_head,
-                                    (config_parse_body_t *) config_parse_zone_body) < 0) {
+                                    (config_parse_body_t *) config_parse_zone_body,
+                                    zone) < 0) {
                 config_free_zone(zone);
                 return -1;
             }
@@ -336,16 +337,16 @@ static int
 config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_token_t *tok)
 {
     if (strcmp(tok->tok_string, "search") == 0)
-        return config_parse_clause(&zone->z_search, ctx, NULL, (config_parse_body_t *) config_parse_zone_search_body);
+        return config_parse_clause(&zone->z_search, ctx, NULL, (config_parse_body_t *) config_parse_zone_search_body, zone);
     if (strcmp(tok->tok_string, "slaves") == 0)
-        return config_parse_clause(&zone->z_slaves, ctx, NULL, (config_parse_body_t *) config_parse_zone_slaves_body);
+        return config_parse_clause(&zone->z_slaves, ctx, NULL, (config_parse_body_t *) config_parse_zone_slaves_body, zone);
 
     config_error_unexpected(tok, ctx);
     return -1;
 }
 
 static int
-config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t *ctx, config_token_t *tok)
+config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t *ctx, config_token_t *tok, dns_config_zone_t *zone)
 {
     void *econf;
     dns_engine_t *engine;
@@ -367,7 +368,7 @@ config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t
         return -1;
     }
 
-    if (config_parse_zone_search_engine_param(search, ctx, engine, econf) < 0) {
+    if (config_parse_zone_search_engine_param(search, ctx, engine, zone, econf) < 0) {
         free(econf);
         free(ze);
         return -1;
@@ -376,7 +377,7 @@ config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t
     if (config_get_token2(tok, CONFIG_TOKEN_SEMICOLON, ctx) < 0)
         return -1;
 
-    if (dns_engine_init(engine, econf) < 0) {
+    if (dns_engine_init(engine, zone, econf) < 0) {
         config_error("query engine initialization failed", NULL, ctx);
         free(econf);
         free(ze);
@@ -391,7 +392,7 @@ config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t
 }
 
 static int
-config_parse_zone_slaves_body(dns_config_zone_slaves_t *slaves, config_context_t *ctx, config_token_t *tok)
+config_parse_zone_slaves_body(dns_config_zone_slaves_t *slaves, config_context_t *ctx, config_token_t *tok, dns_config_zone_t *zone)
 {
     struct sockaddr_storage ss;
 
@@ -412,7 +413,7 @@ config_parse_zone_slaves_body(dns_config_zone_slaves_t *slaves, config_context_t
 }
 
 static int
-config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_context_t *ctx, dns_engine_t *engine, void *econf)
+config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_context_t *ctx, dns_engine_t *engine, dns_config_zone_t *zone, void *econf)
 {
     config_token_t tok;
 
@@ -426,7 +427,7 @@ config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_c
         return 0;
     }
 
-    if (dns_engine_setarg(engine, econf, tok.tok_string) < 0) {
+    if (dns_engine_setarg(engine, zone, econf, tok.tok_string) < 0) {
         config_error("invalid parameter", &tok, ctx);
         return -1;
     }
@@ -435,7 +436,7 @@ config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_c
 }
 
 static int
-config_parse_clause(void *config, config_context_t *ctx, config_parse_head_t *parse_head, config_parse_body_t *parse_body)
+config_parse_clause(void *config, config_context_t *ctx, config_parse_head_t *parse_head, config_parse_body_t *parse_body, void *param)
 {
     config_token_t tok;
 
@@ -443,7 +444,7 @@ config_parse_clause(void *config, config_context_t *ctx, config_parse_head_t *pa
         return -1;
     if (config_get_token2(&tok, CONFIG_TOKEN_BLOCK_OPEN, ctx) < 0)
         return -1;
-    if (parse_body != NULL && config_parse_clause_body(config, ctx, parse_body) < 0)
+    if (parse_body != NULL && config_parse_clause_body(config, ctx, parse_body, param) < 0)
         return -1;
     if (config_get_token2(&tok, CONFIG_TOKEN_BLOCK_CLOSE, ctx) < 0)
         return -1;
@@ -457,7 +458,7 @@ config_parse_clause(void *config, config_context_t *ctx, config_parse_head_t *pa
 }
 
 static int
-config_parse_clause_body(void *config, config_context_t *ctx, config_parse_body_t *parse_body)
+config_parse_clause_body(void *config, config_context_t *ctx, config_parse_body_t *parse_body, void *param)
 {
     config_token_t tok;
 
@@ -475,7 +476,7 @@ config_parse_clause_body(void *config, config_context_t *ctx, config_parse_body_
             return -1;
         }
 
-        if (parse_body(config, ctx, &tok) < 0)
+        if (parse_body(config, ctx, &tok, param) < 0)
             return -1;
     }
 }

@@ -64,7 +64,7 @@ dns_engine_find(char *name)
 }
 
 int
-dns_engine_setarg(dns_engine_t *engine, void *conf, char *arg)
+dns_engine_setarg(dns_engine_t *engine, dns_config_zone_t *zone, void *conf, char *arg)
 {
     dns_engine_param_t param;
 
@@ -80,12 +80,12 @@ dns_engine_setarg(dns_engine_t *engine, void *conf, char *arg)
 }
 
 int
-dns_engine_init(dns_engine_t *engine, void *conf)
+dns_engine_init(dns_engine_t *engine, dns_config_zone_t *zone, void *conf)
 {
     dns_engine_param_t param;
 
     if (engine->eng_init != NULL) {
-        param.ep_zone = NULL;
+        param.ep_zone = zone;
         param.ep_conf = conf;
 
         if (engine->eng_init(&param) < 0)
@@ -116,9 +116,9 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
 {
     int rcode, noerror = 0;
     dns_engine_t *engine;
+    dns_engine_param_t param;
     dns_cache_rrset_t *rrset;
     dns_config_zone_engine_t *ze;
-    dns_engine_param_t param;
 
     if ((rrset = dns_cache_new(q, tls)) == NULL) {
         plog(LOG_ERR, "%s: can't allocate new cache", MODULE);
@@ -136,10 +136,12 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
             param.ep_zone = zone;
             param.ep_conf = ze->ze_econf;
 
-            if (engine->eng_query(&param, rrset, q, tls) < 0)
-                goto error;
+            if (engine->eng_query(&param, rrset, q, tls) < 0) {
+                dns_cache_release(rrset, tls);
+                return NULL;
+            }
 
-            /* XXX */
+            /* XXX eng_flags will be removed */
             dns_cache_setflags(rrset, engine->eng_flags);
             rcode = dns_cache_getrcode(rrset);
 
@@ -157,7 +159,6 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
         ze = (dns_config_zone_engine_t *) dns_list_next(&zone->z_search.zs_engine, &ze->ze_elem);
     }
 
-error:
     dns_cache_setrcode(rrset, (noerror) ? DNS_RCODE_NOERROR : DNS_RCODE_NXDOMAIN);
     dns_cache_negative(rrset, 0);
 
@@ -184,8 +185,8 @@ int
 dns_engine_dump_next(dns_msg_resource_t *res, dns_engine_dump_t *edump)
 {
     dns_engine_t *engine;
-    dns_config_zone_engine_t *ze;
     dns_engine_param_t param;
+    dns_config_zone_engine_t *ze;
 
 retry:
     engine = (dns_engine_t *) edump->ed_ze->ze_engine;
@@ -214,8 +215,8 @@ dns_engine_notify(dns_config_zone_t *zone)
 {
     int result = -1;
     dns_engine_t *engine;
-    dns_config_zone_engine_t *ze;
     dns_engine_param_t param;
+    dns_config_zone_engine_t *ze;
 
     ze = (dns_config_zone_engine_t *) dns_list_head(&zone->z_search.zs_engine);
     while (ze != NULL) {

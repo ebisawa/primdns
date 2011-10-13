@@ -58,22 +58,26 @@ dns_engine_t ServerIdEngine = {
 static int
 serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
-    if (q->mq_class != DNS_CLASS_CH || q->mq_type != DNS_TYPE_TXT)
-        return -1;
+    if (q->mq_type == DNS_TYPE_TXT || q->mq_type == DNS_TYPE_ALL) {
+        if (q->mq_class == DNS_CLASS_CH || q->mq_class == DNS_CLASS_ANY) {
+            /* RFC4892 (id.server) */
+            if (strcasecmp(q->mq_name, "id.server") == 0)
+                return serverid_hostname(rrset, q->mq_name, tls);
+            if (strcasecmp(q->mq_name, "version.server") == 0)
+                return serverid_version(rrset, q->mq_name, tls);
 
-    /* RFC4892 (id.server) */
-    if (strcasecmp(q->mq_name, "id.server") == 0)
-        return serverid_hostname(rrset, q->mq_name, tls);
-    if (strcasecmp(q->mq_name, "version.server") == 0)
-        return serverid_version(rrset, q->mq_name, tls);
+            /* conventional resources */
+            if (strcasecmp(q->mq_name, "hostname.bind") == 0)
+                return serverid_hostname(rrset, q->mq_name, tls);
+            if (strcasecmp(q->mq_name, "version.bind") == 0)
+                return serverid_version(rrset, q->mq_name, tls);
+        }
+    }
 
-    /* conventional resources */
-    if (strcasecmp(q->mq_name, "hostname.bind") == 0)
-        return serverid_hostname(rrset, q->mq_name, tls);
-    if (strcasecmp(q->mq_name, "version.bind") == 0)
-        return serverid_version(rrset, q->mq_name, tls);
+    dns_cache_setrcode(rrset, DNS_RCODE_NXDOMAIN);
+    dns_cache_negative(rrset, 0);
 
-    return -1;
+    return 0;
 }
 
 static int
