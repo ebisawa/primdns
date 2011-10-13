@@ -116,14 +116,12 @@ external_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_questio
 
     if ((fd = external_popen(conf->conf_cmdpath, q)) < 0)
         return -1;
-
-    plog(LOG_DEBUG, "%s: fd = %d", MODULE, fd);
-
     if (external_read_response(rrset, fd, q, tls) < 0) {
         close(fd);
         return -1;
     }
 
+    plog(LOG_DEBUG, "%s: fd = %d", MODULE, fd);
     close(fd);
 
     return 0;
