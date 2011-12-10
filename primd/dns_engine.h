@@ -67,8 +67,8 @@ typedef struct {
 } dns_engine_t;
 
 dns_engine_t *dns_engine_find(char *name);
-int dns_engine_setarg(dns_engine_t *engine, void *conf, char *arg);
-int dns_engine_init(dns_engine_t *engine, void *conf);
+int dns_engine_setarg(dns_engine_t *engine, dns_config_zone_t *zone, void *conf, char *arg);
+int dns_engine_init(dns_engine_t *engine, dns_config_zone_t *zone, void *conf);
 int dns_engine_destroy(dns_engine_t *engine, void *conf);
 dns_cache_rrset_t *dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls);
 int dns_engine_dump_init(dns_engine_dump_t *edump, dns_config_zone_t *zone);

@@ -57,9 +57,12 @@
 #define IS_VALID_QUESTION(q)     ((q)->mq_class != 0 && (q)->mq_type != 0)
 
 typedef struct {
-    unsigned   stat_request;
+    unsigned   stat_query;
+    unsigned   stat_answer;
+    unsigned   stat_notify;
     unsigned   stat_error;
-    unsigned   stat_response;
+    unsigned   stat_axfr_request;
+    unsigned   stat_axfr_success;
 } session_stats_t;
 
 static int NumWorkers;
@@ -101,7 +104,8 @@ static int session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_m
 static int session_send_axfr_resource(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
 static int session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset);
 static int session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
-static int session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode);
+static int session_make_notify_response(dns_sock_buf_t *sbuf, dns_session_t *session);
+static int session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode, int flags);
 static int session_write_header(dns_session_t *session, dns_msg_handle_t *handle, void *buf, int rcode, int flags);
 static void session_write_resources(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype);
 static void session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype);
@@ -201,9 +205,11 @@ void
 dns_session_printstats(int s)
 {
     dns_util_sendf(s, "Session:\n");
-    dns_util_sendf(s, "    %10u sessions requested\n",   SessionStats.stat_request);
-    dns_util_sendf(s, "    %10u sessions responded\n",   SessionStats.stat_response);
-    dns_util_sendf(s, "    %10u sessions failed\n",      SessionStats.stat_error);
+    dns_util_sendf(s, "    %10u queries requested\n",          SessionStats.stat_query);
+    dns_util_sendf(s, "    %10u answers responded\n",          SessionStats.stat_answer);
+    dns_util_sendf(s, "    %10u notify messages recevied\n",   SessionStats.stat_notify);
+    dns_util_sendf(s, "    %10u axfr requests recevied\n",     SessionStats.stat_axfr_request);
+    dns_util_sendf(s, "    %10u axfr transfers succeeded\n",   SessionStats.stat_axfr_success);
     dns_util_sendf(s, "\n");
 }
 
@@ -347,8 +353,6 @@ session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf)
     int rcode;
     dns_msg_question_t *q;
 
-    ATOMIC_INC(&SessionStats.stat_request);
-
     if ((rcode = session_read_question(session, sbuf)) != DNS_RCODE_NOERROR)
         goto error;
 
@@ -375,12 +379,13 @@ session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf)
     return 0;
 
 error:
-    if (rcode > 0 && session_make_error(sbuf, session, rcode) >= 0)
+    if (rcode > 0 && session_make_error(sbuf, session, rcode, 0) >= 0)
         session_send_response(sbuf);
     else
         session_send_finish(sbuf);
 
     ATOMIC_INC(&SessionStats.stat_error);
+
     return -1;
 }
 
@@ -413,6 +418,8 @@ session_request_query_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     dns_cache_rrset_t *rrset;
 
+    ATOMIC_INC(&SessionStats.stat_query);
+
     if ((rrset = session_query_answer(session, sbuf)) == NULL)
         return DNS_RCODE_SERVFAIL;
 
@@ -423,7 +430,8 @@ session_request_query_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
 
     dns_cache_release(rrset, &session->sess_tls);
     session_send_response(sbuf);
-    ATOMIC_INC(&SessionStats.stat_response);
+
+    ATOMIC_INC(&SessionStats.stat_answer);
 
     return DNS_RCODE_NOERROR;
 }
@@ -437,6 +445,8 @@ session_request_query_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
     dns_msg_question_t *q;
     dns_msg_resource_t soa;
     dns_config_zone_t *zone;
+
+    ATOMIC_INC(&SessionStats.stat_axfr_request);
 
     q = &session->sess_question;  zone = session->sess_zone;
     dns_util_sa2str_wop(from, sizeof(from), (SA *) &sbuf->sb_remote);
@@ -467,14 +477,23 @@ session_request_query_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
     if ((r = session_send_axfr(sbuf, session, &soa)) != 0)
         return r;
 
+    ATOMIC_INC(&SessionStats.stat_axfr_success);
+
     return DNS_RCODE_NOERROR;
 }
 
 static int
 session_request_notify(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
+    ATOMIC_INC(&SessionStats.stat_notify);
+
     if (dns_engine_notify(session->sess_zone) < 0)
         return -1;
+
+    if (session_make_notify_response(sbuf, session) < 0)
+        return DNS_RCODE_SERVFAIL;
+
+    session_send_response(sbuf);
 
     return DNS_RCODE_NOERROR;
 }
@@ -521,6 +540,7 @@ session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
         return DNS_RCODE_FORMERR;
 
     dns_msg_read_close(&handle);
+
     return DNS_RCODE_NOERROR;
 }
 
@@ -746,6 +766,7 @@ session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource
         return DNS_RCODE_SERVFAIL;
 
     session_send_finish(sbuf);
+
     return 0;
 }
 
@@ -813,7 +834,6 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
 static int
 session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res)
 {
-    int resmax;
     dns_msg_handle_t handle;
 
     /*
@@ -822,9 +842,7 @@ session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg
      * (and its extension via the EDNS0 mechanism specified in [RFC2671])
      * is not relevant for AXFR
      */
-    resmax = SOCK_MSGMAX(sbuf->sb_sock);
-
-    if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
+    if (dns_msg_write_open(&handle, sbuf->sb_buf, SOCK_MSGMAX(sbuf->sb_sock)) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_open() failed", MODULE);
         return -1;
     }
@@ -855,20 +873,34 @@ session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg
 }
 
 static int
-session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode)
+session_make_notify_response(dns_sock_buf_t *sbuf, dns_session_t *session)
 {
-    int resmax;
+    /*
+     * see RFC1996 4.7:
+     *
+     * query ID:   (same)
+     * op:         NOTIFY (4)
+     * resp:       NOERROR
+     * flags:      QR AA
+     * qcount:     1
+     * qname:      (zone name)
+     * qclass:     (zone class)
+     * qtype:      T_SOA
+     */
+    return session_make_error(sbuf, session, DNS_RCODE_NOERROR, DNS_FLAG_AA);
+}
+
+static int
+session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode, int flags)
+{
     dns_msg_handle_t handle;
 
-    plog(LOG_DEBUG, "%s: send error response", MODULE);
-    resmax = SOCK_MSGMAX(sbuf->sb_sock);
-
-    if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
+    if (dns_msg_write_open(&handle, sbuf->sb_buf, SOCK_MSGMAX(sbuf->sb_sock)) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_open() failed", MODULE);
         return -1;
     }
 
-    if (session_write_header(session, &handle, sbuf->sb_buf, rcode, 0) < 0)
+    if (session_write_header(session, &handle, sbuf->sb_buf, rcode, flags) < 0)
         return -1;
 
     if ((sbuf->sb_buflen = dns_msg_write_close(&handle)) < 0) {
