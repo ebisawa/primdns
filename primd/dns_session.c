@@ -137,7 +137,7 @@ dns_session_start_thread(int threads)
         if (dns_pool_init(&SessionBufPool, sizeof(dns_sock_buf_t),
                           threads + threads           /* in/out queue */
                           + threads                   /* worker threads */
-                          + NELEMS(MainSessions) + 1  /* sock threads */ 
+                          + NELEMS(MainSessions) + 1  /* sock threads */
                           + 1) < 0) {                 /* magic */
             return -1;
         }

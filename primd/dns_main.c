@@ -350,7 +350,7 @@ main_make_pidfile(void)
         close(fd);
         return -1;
     }
- 
+
     uid = (Options.opt_user > 0) ? Options.opt_user : -1;
     gid = (Options.opt_group > 0) ? Options.opt_group : -1;
 
