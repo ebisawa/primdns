@@ -90,7 +90,7 @@ forward_query(dns_cache_rrset_t *rrset, forward_config_t *conf, dns_msg_question
     int s;
     uint16_t msgid;
     struct sockaddr *to;
-    
+
     msgid = xarc4random(&tls->tls_arctx);
     to = (SA *) &conf->conf_addr;
 
@@ -264,7 +264,7 @@ forward_msg_parse(dns_cache_rrset_t *rrset, char *buf, int len, uint16_t msgid, 
 
     if (count == 0) {
         /* cache SOA for negative caching */
-        count = ntohs(header.hdr_nscount);        
+        count = ntohs(header.hdr_nscount);
         if (forward_msg_parse_resource_soa(rrset, &handle, count) < 0) {
             dns_msg_read_close(&handle);
             return -1;

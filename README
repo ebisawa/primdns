@@ -93,11 +93,11 @@ primdns - A Simple DNS Contents Server
 
       $ /usr/local/primd/sbin/primd -f
 
-  (4) DNS 問い合わせをしてみる  
+  (4) DNS 問い合わせをしてみる
 
     dig 等のツールを使ってローカルホスト状の primd に問い合わせを
     行います。無事応答が返ってくれば成功です。
-  
+
       $ dig @127.0.0.1 localhost
 
 * 起動オプション
