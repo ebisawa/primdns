@@ -104,7 +104,7 @@ dns_proto_parse_type(char *string)
         if (strcasecmp(TypeString[i].string, string) == 0)
             return TypeString[i].code;
     }
-    
+
     return -1;
 }
 
@@ -117,7 +117,7 @@ dns_proto_parse_class(char *string)
         if (strcasecmp(ClassString[i].string, string) == 0)
             return ClassString[i].code;
     }
-    
+
     return -1;
 }
 

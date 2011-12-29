@@ -533,7 +533,7 @@ msg_decomp_name(dns_msg_handle_t *handle, void *dst, int dstmax)
                 plog(LOG_NOTICE, "%s: pointer validation failed (%s)", MODULE, __func__);
                 return -1;
             }
-            
+
             memcpy(d, p, len);
             p += len;
             d += len;
@@ -680,7 +680,7 @@ msg_encode_name(char *dst, int dstmax, char *name)
         s = p + 1;
         dstmax -= len;
     }
-    
+
     if (dstmax < 1) {
         plog(LOG_DEBUG, "%s: name buffer too small", __func__);
         return -1;
