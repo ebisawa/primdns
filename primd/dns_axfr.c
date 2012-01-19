@@ -28,8 +28,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <stdio.h>
-#include <stdint.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -52,7 +52,7 @@ static int axfr_setarg(dns_engine_param_t *ep, char *arg);
 static int axfr_init(dns_engine_param_t *ep);
 static int axfr_destroy(dns_engine_param_t *ep);
 static int axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
-static int axfr_notify(dns_engine_param_t *ep);
+static int axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote);
 static int axfr_exec_receiver(char *master_addr, char *zone_name, char *datname);
 static int axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datname);
 static void axfr_dataname(char *buf, int bufsize, char *zone_name);
@@ -125,18 +125,19 @@ axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t 
 }
 
 static int
-axfr_notify(dns_engine_param_t *ep)
+axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
 {
     char maddr[256], datname[256];
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
-    /* XXX validate notification, from valid master server? */
-    plog(LOG_DEBUG, "%s: XXX notify", __func__);
+    /* notify from valid master server? */
+    if (dns_util_sacmp_wop((SA *) &conf->ac_master, remote) != 0) {
+        dns_util_sa2str_wop(maddr, sizeof(maddr), remote);
+        plog(LOG_NOTICE, "%s: invalid NOTIFY from %s", __func__, maddr);
+        return -1;
+    }
 
-
-    /* XXX SOA check */
-
-
+    /* XXX SOA record check */
 
     dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
     axfr_dataname(datname, sizeof(datname), ep->ep_zone->z_name);

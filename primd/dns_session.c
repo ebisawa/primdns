@@ -487,9 +487,8 @@ session_request_notify(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     ATOMIC_INC(&SessionStats.stat_notify);
 
-    if (dns_engine_notify(session->sess_zone) < 0)
+    if (dns_engine_notify(session->sess_zone, (SA *) &sbuf->sb_remote) < 0)
         return -1;
-
     if (session_make_notify_response(sbuf, session) < 0)
         return DNS_RCODE_SERVFAIL;
 

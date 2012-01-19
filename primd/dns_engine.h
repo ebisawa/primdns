@@ -52,7 +52,7 @@ typedef int (dns_engine_init_t)(dns_engine_param_t *ep);
 typedef int (dns_engine_destroy_t)(dns_engine_param_t *ep);
 typedef int (dns_engine_query_t)(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
 typedef int (dns_engine_dumpnext_t)(dns_engine_param_t *param, dns_msg_resource_t *res, dns_engine_dump_t *edump);
-typedef int (dns_engine_notify_t)(dns_engine_param_t *param);
+typedef int (dns_engine_notify_t)(dns_engine_param_t *param, struct sockaddr *remote);
 
 typedef struct {
     char                       *eng_name;
@@ -71,8 +71,8 @@ int dns_engine_setarg(dns_engine_t *engine, dns_config_zone_t *zone, void *conf,
 int dns_engine_init(dns_engine_t *engine, dns_config_zone_t *zone, void *conf);
 int dns_engine_destroy(dns_engine_t *engine, void *conf);
 dns_cache_rrset_t *dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls);
+int dns_engine_notify(dns_config_zone_t *zone, struct sockaddr *remote);
 int dns_engine_dump_init(dns_engine_dump_t *edump, dns_config_zone_t *zone);
 int dns_engine_dump_next(dns_msg_resource_t *res, dns_engine_dump_t *edump);
-int dns_engine_notify(dns_config_zone_t *zone);
 
 #endif

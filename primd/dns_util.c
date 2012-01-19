@@ -51,7 +51,9 @@
 #define MODULE "util"
 
 static int util_compare_sin(struct sockaddr_in *a, struct sockaddr_in *b);
+static int util_compare_sin_wop(struct sockaddr_in *a, struct sockaddr_in *b);
 static int util_compare_sin6(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
+static int util_compare_sin6_wop(struct sockaddr_in6 *a, struct sockaddr_in6 *b);
 
 void
 dns_util_strlcpy(char *dst, char *src, int max)
@@ -165,9 +167,21 @@ dns_util_sacmp(struct sockaddr *a, struct sockaddr *b)
     switch (a->sa_family) {
     case AF_INET:
         return util_compare_sin((struct sockaddr_in *) a, (struct sockaddr_in *) b);
-
     case AF_INET6:
         return util_compare_sin6((struct sockaddr_in6 *) a, (struct sockaddr_in6 *) b);
+    }
+
+    return -1;
+}
+
+int
+dns_util_sacmp_wop(struct sockaddr *a, struct sockaddr *b)
+{
+    switch (a->sa_family) {
+    case AF_INET:
+        return util_compare_sin_wop((struct sockaddr_in *) a, (struct sockaddr_in *) b);
+    case AF_INET6:
+        return util_compare_sin6_wop((struct sockaddr_in6 *) a, (struct sockaddr_in6 *) b);
     }
 
     return -1;
@@ -449,7 +463,7 @@ util_compare_sin(struct sockaddr_in *a, struct sockaddr_in *b)
 {
     int r;
 
-    if ((r = memcmp(&a->sin_addr, &b->sin_addr, sizeof(a->sin_addr))) != 0)
+    if ((r = util_compare_sin_wop(a, b)) < 0)
         return r;
     if ((r = a->sin_port - b->sin_port) != 0)
         return r;
@@ -458,14 +472,26 @@ util_compare_sin(struct sockaddr_in *a, struct sockaddr_in *b)
 }
 
 static int
+util_compare_sin_wop(struct sockaddr_in *a, struct sockaddr_in *b)
+{
+    return memcmp(&a->sin_addr, &b->sin_addr, sizeof(a->sin_addr));
+}
+
+static int
 util_compare_sin6(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
 {
     int r;
 
-    if ((r = memcmp(&a->sin6_addr, &b->sin6_addr, sizeof(a->sin6_addr))) != 0)
+    if ((r = util_compare_sin6_wop(a, b)) < 0)
         return r;
     if ((r = a->sin6_port - b->sin6_port) != 0)
         return r;
 
     return 0;
+}
+
+static int
+util_compare_sin6_wop(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
+{
+    return memcmp(&a->sin6_addr, &b->sin6_addr, sizeof(a->sin6_addr));
 }

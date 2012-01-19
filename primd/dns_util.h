@@ -59,6 +59,7 @@ void dns_util_sacopy(struct sockaddr *dst, struct sockaddr *src);
 void dns_util_sasetport(struct sockaddr *sa, uint16_t port);
 int dns_util_sagetport(struct sockaddr *sa);
 int dns_util_sacmp(struct sockaddr *a, struct sockaddr *b);
+int dns_util_sacmp_wop(struct sockaddr *a, struct sockaddr *b);
 int dns_util_str2sa(struct sockaddr *sa, char *addr, uint16_t port);
 int dns_util_sa2str(char *buf, int bufmax, struct sockaddr *sa);
 int dns_util_sa2str_wop(char *buf, int bufmax, struct sockaddr *sa);

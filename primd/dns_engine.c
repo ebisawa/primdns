@@ -166,6 +166,33 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
 }
 
 int
+dns_engine_notify(dns_config_zone_t *zone, struct sockaddr *remote)
+{
+    int result = -1;
+    dns_engine_t *engine;
+    dns_engine_param_t param;
+    dns_config_zone_engine_t *ze;
+
+    ze = (dns_config_zone_engine_t *) dns_list_head(&zone->z_search.zs_engine);
+    while (ze != NULL) {
+        engine = (dns_engine_t *) ze->ze_engine;
+        if (engine->eng_notify != NULL) {
+            plog(LOG_DEBUG, "%s: notify \"%s\" engine", MODULE, engine->eng_name);
+
+            param.ep_zone = zone;
+            param.ep_conf = ze->ze_econf;
+
+            if (engine->eng_notify(&param, remote) >= 0)
+                result = 0;
+        }
+
+        ze = (dns_config_zone_engine_t *) dns_list_next(&zone->z_search.zs_engine, &ze->ze_elem);
+    }
+
+    return result;
+}
+
+int
 dns_engine_dump_init(dns_engine_dump_t *edump, dns_config_zone_t *zone)
 {
     dns_engine_t *engine;
@@ -208,31 +235,4 @@ retry:
     }
 
     return 0;
-}
-
-int
-dns_engine_notify(dns_config_zone_t *zone)
-{
-    int result = -1;
-    dns_engine_t *engine;
-    dns_engine_param_t param;
-    dns_config_zone_engine_t *ze;
-
-    ze = (dns_config_zone_engine_t *) dns_list_head(&zone->z_search.zs_engine);
-    while (ze != NULL) {
-        engine = (dns_engine_t *) ze->ze_engine;
-        if (engine->eng_notify != NULL) {
-            plog(LOG_DEBUG, "%s: notify \"%s\" engine", MODULE, engine->eng_name);
-
-            param.ep_zone = zone;
-            param.ep_conf = ze->ze_econf;
-
-            if (engine->eng_notify(&param) >= 0)
-                result = 0;
-        }
-
-        ze = (dns_config_zone_engine_t *) dns_list_next(&zone->z_search.zs_engine, &ze->ze_elem);
-    }
-
-    return result;
 }
