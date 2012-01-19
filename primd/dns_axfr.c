@@ -90,8 +90,7 @@ axfr_init(dns_engine_param_t *ep)
         return -1;
     }
 
-    /* XXX check SOA record */
-
+    /* XXX check SOA serial */
 
     return 0;
 }
@@ -130,14 +129,11 @@ axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
     char maddr[256], datname[256];
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
-    /* notify from valid master server? */
     if (dns_util_sacmp_wop((SA *) &conf->ac_master, remote) != 0) {
         dns_util_sa2str_wop(maddr, sizeof(maddr), remote);
         plog(LOG_NOTICE, "%s: invalid NOTIFY from %s", __func__, maddr);
         return -1;
     }
-
-    /* XXX SOA record check */
 
     dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
     axfr_dataname(datname, sizeof(datname), ep->ep_zone->z_name);
