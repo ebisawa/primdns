@@ -238,7 +238,7 @@ uninstall-sbinPROGRAMS:
 
 clean-sbinPROGRAMS:
 	-test -z "$(sbin_PROGRAMS)" || rm -f $(sbin_PROGRAMS)
-primd$(EXEEXT): $(primd_OBJECTS) $(primd_DEPENDENCIES) 
+primd$(EXEEXT): $(primd_OBJECTS) $(primd_DEPENDENCIES)
 	@rm -f primd$(EXEEXT)
 	$(LINK) $(primd_OBJECTS) $(primd_LDADD) $(LIBS)
 

@@ -191,7 +191,7 @@ int
 dns_util_str2sa(struct sockaddr *sa, char *addr, uint16_t port)
 {
     struct addrinfo hints, *res;
-    
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;

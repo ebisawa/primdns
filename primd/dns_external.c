@@ -160,7 +160,7 @@ external_popen(char *cmd, dns_msg_question_t *q)
                NULL);
 
         exit(1);
-    }   
+    }
 
     close(fd[1]);
 
