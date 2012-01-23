@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 #
-#  Copyright (c) 2010, 2011 Satoshi Ebisawa. All rights reserved.
+#  Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
 #
 #  Redistribution and use in source and binary forms, with or without
 #  modification, are permitted provided that the following conditions
@@ -32,7 +32,7 @@ require 'date'
 require 'optparse'
 
 FILE_MAGIC = 0x61727964   # "aryd"
-FILE_VERSION = 1
+FILE_VERSION = 2
 
 DNS_CLASS_IN = 1
 
@@ -93,6 +93,14 @@ end
 #     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #     !                           Hash Size                           !
 #     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                           SOA Serial                          !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                           SOA Refresh                         !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                           SOA Retry                           !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                           SOA Expire                          !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #     !                                                               !
 #     ~                          Hash Entries                         ~
 #     !                                                               !
@@ -136,6 +144,7 @@ end
 class DataFile
   def initialize(hashsize)
     @hashsize = hashsize
+    @serial = 0; @refresh = 0; @retry = 0; @expire = 0
     @block = []
 
     @hashsize.times do |index|
@@ -147,9 +156,13 @@ class DataFile
     records.each do |rec|
       index = hash_index(rec.r_name)
       if rec.r_type == DNS_TYPE_SOA
-        if @block[index].find_record(rec.r_name, rec.r_type)
-          next   # SOA record duplicated - ignore it
-        end
+        # ignore duplicated SOA record
+        next if @block[index].find_record(rec.r_name, rec.r_type)
+
+        @serial = rec.r_serial
+        @refresh = rec.r_refresh
+        @retry = rec.r_retry
+        @expire = rec.r_expire
       end
       @block[index].push_record(rec)
     end
@@ -181,7 +194,7 @@ class DataFile
   end
 
   def header
-    [ FILE_MAGIC, 0, FILE_VERSION, @hashsize ].pack('NnnN')
+    [ FILE_MAGIC, 0, FILE_VERSION, @hashsize, @serial, @refresh, @retry, @expire ].pack('NnnNNNNN')
   end
 
   def hash_index(name)
@@ -382,10 +395,16 @@ class RecordCNAME < Record
 end
 
 class RecordSOA < Record
+  attr_reader :r_serial, :r_refresh, :r_retry, :r_expire
+
   def initialize(name, mname, rname, serial, refresh, tretry, expire, minimum, ttl)
     @r_name = name
     @r_data = conv_soa(mname, rname, serial, refresh, tretry, expire, minimum)
     @r_ttl = ttl
+    @r_serial = serial
+    @r_refresh = refresh
+    @r_retry = tretry
+    @r_expire = expire
   end
 
   def r_type

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,7 +46,7 @@
 #define MODULE "data"
 
 #define DATA_MAGIC     0x61727964   /* "aryd" */
-#define DATA_VERSION   1
+#define DATA_VERSION   2
 
 typedef struct {
     unsigned        stat_queries;
@@ -62,6 +62,10 @@ typedef struct {
     uint16_t        df_zero;
     uint16_t        df_version;
     uint32_t        df_hashsize;
+    uint32_t        df_serial;
+    uint32_t        df_refresh;
+    uint32_t        df_retry;
+    uint32_t        df_expire;
 } __attribute__((packed)) data_header_t;
 
 /* network byte order */
@@ -196,6 +200,8 @@ data_init(dns_engine_param_t *ep)
     conf->conf_hash = (data_hash_t *) ((uint8_t *) p + sizeof(data_header_t));
     conf->conf_datasize = size;
     conf->conf_hashsize = ntohl(header->df_hashsize);
+
+    plog(LOG_INFO, "zone \"%s\": serial %u", ep->ep_zone->z_name, ntohl(header->df_serial));
 
     return 0;
 }
