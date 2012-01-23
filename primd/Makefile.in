@@ -54,7 +54,7 @@ am_primd_OBJECTS = dns_abq.$(OBJEXT) dns_acl.$(OBJEXT) \
 	dns_log.$(OBJEXT) dns_main.$(OBJEXT) dns_msg.$(OBJEXT) \
 	dns_notify.$(OBJEXT) dns_pool.$(OBJEXT) dns_proto.$(OBJEXT) \
 	dns_serverid.$(OBJEXT) dns_session.$(OBJEXT) \
-	dns_sock.$(OBJEXT) dns_util.$(OBJEXT)
+	dns_sock.$(OBJEXT) dns_timer.$(OBJEXT) dns_util.$(OBJEXT)
 primd_OBJECTS = $(am_primd_OBJECTS)
 primd_LDADD = $(LDADD)
 DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
@@ -161,12 +161,13 @@ primd_SOURCES = dns_abq.c dns_acl.c dns_arc4random.c dns_axfr.c \
 	dns_engine.c dns_epoll.c dns_external.c dns_file.c \
 	dns_forward.c dns_kqueue.c dns_list.c dns_log.c dns_main.c \
 	dns_msg.c dns_notify.c dns_pool.c dns_proto.c dns_serverid.c \
-	dns_session.c dns_sock.c dns_util.c dns.h dns_abq.h dns_acl.h \
-	dns_arc4random.h dns_atomic.h dns_axfr.h dns_babq.h \
-	dns_cache.h dns_config.h dns_control.h dns_data.h dns_engine.h \
-	dns_external.h dns_file.h dns_forward.h dns_list.h dns_log.h \
-	dns_msg.h dns_notify.h dns_pool.h dns_proto.h dns_serverid.h \
-	dns_session.h dns_sock.h dns_util.h
+	dns_session.c dns_sock.c dns_timer.c dns_util.c dns.h \
+	dns_abq.h dns_acl.h dns_arc4random.h dns_atomic.h dns_axfr.h \
+	dns_babq.h dns_cache.h dns_config.h dns_control.h dns_data.h \
+	dns_engine.h dns_external.h dns_file.h dns_forward.h \
+	dns_list.h dns_log.h dns_msg.h dns_notify.h dns_pool.h \
+	dns_proto.h dns_serverid.h dns_session.h dns_sock.h \
+	dns_timer.h dns_util.h
 all: all-am
 
 .SUFFIXES:
@@ -238,7 +239,7 @@ uninstall-sbinPROGRAMS:
 
 clean-sbinPROGRAMS:
 	-test -z "$(sbin_PROGRAMS)" || rm -f $(sbin_PROGRAMS)
-primd$(EXEEXT): $(primd_OBJECTS) $(primd_DEPENDENCIES)
+primd$(EXEEXT): $(primd_OBJECTS) $(primd_DEPENDENCIES) 
 	@rm -f primd$(EXEEXT)
 	$(LINK) $(primd_OBJECTS) $(primd_LDADD) $(LIBS)
 
@@ -273,6 +274,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_serverid.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_session.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_sock.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_timer.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dns_util.Po@am__quote@
 
 .c.o:

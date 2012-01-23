@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,6 +45,7 @@
 #include "dns_notify.h"
 #include "dns_sock.h"
 #include "dns_session.h"
+#include "dns_timer.h"
 
 #define MODULE "main"
 
@@ -370,6 +371,7 @@ main_loop(void)
     for (;;) {
         dns_sock_proc();
         dns_sock_timer_proc();
+        dns_timer_execute();
 
         main_signal_proc(SIGHUP, main_sighup_proc);
         main_signal_proc(SIGTERM, main_sigterm_proc);
