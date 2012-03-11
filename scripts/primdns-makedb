@@ -31,6 +31,8 @@
 require 'date'
 require 'optparse'
 
+PID_PATH = "/var/run/primd.pid"
+
 FILE_MAGIC = 0x61727964   # "aryd"
 FILE_VERSION = 2
 
@@ -923,11 +925,19 @@ def usage
   abort
 end
 
+def sighup
+  open(PID_PATH) do |io|
+    pid = io.readline.to_i
+    Process.kill(:SIGHUP, pid)
+  end
+end
+
 ARGV.options do |opt|
   opt.banner = $banner
-  opt.on('-d',      'debug')                   {|v| $options[:debug] = v }
-  opt.on('-t',      'tiny-style zone file')    {|v| $options[:tinyzone] = v }
-  opt.on('--stdin', 'read source from stdin')  {|v| $options[:stdin] = v }
+  opt.on('-d',       'debug')                   {|v| $options[:debug] = v }
+  opt.on('-t',       'tiny-style zone file')    {|v| $options[:tinyzone] = v }
+  opt.on('--stdin',  'read source from stdin')  {|v| $options[:stdin] = v }
+  opt.on('--sighup', 'send sighup to daemon')   {|v| $options[:sighup] = v }
   opt.parse!
 end
 
@@ -942,11 +952,8 @@ def getsource(src)
   io.readlines
 end
 
-if $options[:tinyzone]
-  converter = TinyZone.new
-else
-  converter = BindZone.new
-end
-
+converter = $options[:tinyzone] ? TinyZone.new : BindZone.new
 lines = getsource(src)
 converter.makedb(dst, lines)
+
+sighup if $options[:sighup]

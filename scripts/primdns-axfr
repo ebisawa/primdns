@@ -310,7 +310,7 @@ zone = ARGV.shift
 usage if addr == nil || zone == nil
 
 if $options[:makedb] != nil
-  outio = IO.popen("primdns-makedb --stdin #{$options[:makedb]}", 'w')
+  outio = IO.popen("primdns-makedb --stdin --sighup #{$options[:makedb]}", 'w')
 end
 
 s = DNSSocket.new(addr)
