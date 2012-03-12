@@ -31,8 +31,21 @@
 #define __DNS_DATA_H__
 #include "dns_engine.h"
 
+/* network byte order */
+typedef struct {
+    uint32_t        df_magic;
+    uint16_t        df_zero;
+    uint16_t        df_version;
+    uint32_t        df_hashsize;
+    uint32_t        df_serial;
+    uint32_t        df_refresh;
+    uint32_t        df_retry;
+    uint32_t        df_expire;
+} __attribute__((packed)) data_header_t;
+
 extern dns_engine_t DataEngine;
 
 void dns_data_printstats(int s);
+data_header_t *dns_data_getheader(void *dataconf);
 
 #endif

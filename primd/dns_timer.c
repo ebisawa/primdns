@@ -48,7 +48,7 @@ static dns_timer_t *TimerTail;
 int
 dns_timer_request(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param)
 {
-    plog(LOG_DEBUG, "%s: timeout request after %d ms", __func__, msec);
+    plog(LOG_DEBUG, "%s: request timer %p: %d ms", __func__, timer, msec);
 
     gettimeofday(&timer->t_time, NULL);
     timer_tvafter(&timer->t_time, msec);
@@ -70,7 +70,7 @@ dns_timer_cancel(dns_timer_t *timer)
 }
 
 int
-dns_timer_nextimo(struct timeval *timo)
+dns_timer_next_timeout(struct timeval *timo)
 {
     int s, u;
     dns_timer_t *next;
@@ -107,7 +107,7 @@ dns_timer_execute()
 
     gettimeofday(&now, NULL);
 
-    while (TimerHead != NULL) {
+    while ((t = TimerHead) != NULL) {
         if (timer_tvcompare(&now, &t->t_time) < 0)
             return;
 
@@ -157,6 +157,9 @@ timer_unregister(dns_timer_t *timer)
         TimerHead = timer->t_next;
     if (TimerTail == timer)
         TimerTail = timer->t_prev;
+
+    timer->t_prev = NULL;
+    timer->t_next = NULL;
 }
 
 static void
@@ -174,7 +177,8 @@ timer_chain_next(dns_timer_t *parent, dns_timer_t *timer)
 static void
 timer_tvafter(struct timeval *tv, int msec)
 {
-    tv->tv_usec += msec * 1000;
+    tv->tv_sec += msec / 1000;
+    tv->tv_usec += msec % 1000;
 
     while (tv->tv_usec > TIMER_SEC2USEC(1)) {
         tv->tv_usec -= TIMER_SEC2USEC(1);

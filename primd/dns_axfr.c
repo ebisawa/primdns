@@ -37,14 +37,21 @@
 #include <sys/stat.h>
 #include "dns.h"
 #include "dns_cache.h"
+#include "dns_config.h"
 #include "dns_data.h"
 #include "dns_engine.h"
+#include "dns_timer.h"
 #include "dns_util.h"
 
 #define MODULE "axfr"
 
+#define AXFR_REFRESH_MAX  864000   /* 10 days */
+
 typedef struct {
     struct sockaddr_storage   ac_master;
+    char                      ac_zonename[DNS_CONFIG_ZONE_NAME_MAX];
+    int                       ac_retry;
+    dns_timer_t               ac_timer;
     void                     *ac_dataconf;
 } axfr_config_t;
 
@@ -53,9 +60,11 @@ static int axfr_init(dns_engine_param_t *ep);
 static int axfr_destroy(dns_engine_param_t *ep);
 static int axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
 static int axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote);
+static int axfr_do_axfr(axfr_config_t *conf);
 static int axfr_exec_receiver(char *master_addr, char *zone_name, char *datname);
 static int axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datname);
 static void axfr_dataname(char *buf, int bufsize, char *zone_name);
+static void axfr_refresh(axfr_config_t *conf);
 
 static char *PrimAxfr = "primdns-axfr";
 
@@ -81,16 +90,37 @@ axfr_setarg(dns_engine_param_t *ep, char *arg)
 static int
 axfr_init(dns_engine_param_t *ep)
 {
+    int refresh;
     char buf[256];
+    data_header_t *header;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
+    dns_util_strlcpy(conf->ac_zonename, ep->ep_zone->z_name, sizeof(conf->ac_zonename));
     axfr_dataname(buf, sizeof(buf), ep->ep_zone->z_name);
+
     if (axfr_init_data_engine(ep->ep_zone, conf, buf) < 0) {
         plog(LOG_ERR, "%s: axfr_init_data_engine() failed", MODULE);
         return -1;
     }
 
-    /* XXX check SOA serial */
+    if (conf->ac_dataconf == NULL)
+        return 0;
+
+    header = dns_data_getheader(conf->ac_dataconf);
+    plog(LOG_INFO, "%s: zone \"%s\": refresh %u, retry %u, expire %u",
+         MODULE, ep->ep_zone->z_name,
+         ntohl(header->df_refresh), ntohl(header->df_retry), ntohl(header->df_expire));
+
+    /* set refresh timer */
+    refresh = ntohl(header->df_refresh);
+    if (refresh > AXFR_REFRESH_MAX || refresh < 0)
+        refresh = AXFR_REFRESH_MAX;
+
+    conf->ac_retry = ntohl(header->df_retry);
+    if (conf->ac_retry > AXFR_REFRESH_MAX || conf->ac_retry < 0)
+        conf->ac_retry = AXFR_REFRESH_MAX;
+
+    dns_timer_request(&conf->ac_timer, refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
 
     return 0;
 }
@@ -99,6 +129,8 @@ static int
 axfr_destroy(dns_engine_param_t *ep)
 {
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
+
+    dns_timer_cancel(&conf->ac_timer);
 
     if (conf->ac_dataconf != NULL) {
         dns_engine_destroy(&DataEngine, conf->ac_dataconf);
@@ -123,10 +155,11 @@ axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t 
     return DataEngine.eng_query(&data_param, rrset, q, tls);
 }
 
+/* must be threadsafe */
 static int
 axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
 {
-    char maddr[256], datname[256];
+    char maddr[256];
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
     if (dns_util_sacmp_wop((SA *) &conf->ac_master, remote) != 0) {
@@ -135,10 +168,18 @@ axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
         return -1;
     }
 
-    dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
-    axfr_dataname(datname, sizeof(datname), ep->ep_zone->z_name);
+    return axfr_do_axfr(conf);
+}
 
-    if (axfr_exec_receiver(maddr, ep->ep_zone->z_name, datname) < 0) {
+static int
+axfr_do_axfr(axfr_config_t *conf)
+{
+    char maddr[256], datname[256];
+
+    dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
+    axfr_dataname(datname, sizeof(datname), conf->ac_zonename);
+
+    if (axfr_exec_receiver(maddr, conf->ac_zonename, datname) < 0) {
         plog(LOG_ERR, "%s: axfr_exec_receiver() failed", MODULE);
         unlink(datname);
         return -1;
@@ -183,6 +224,7 @@ axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datnam
     }
 
     conf->ac_dataconf = dataconf;
+
     return 0;
 }
 
@@ -190,4 +232,11 @@ static void
 axfr_dataname(char *buf, int bufsize, char *zone_name)
 {
     snprintf(buf, bufsize, "%s/.axfr_%s.dat", ConfDir, zone_name);
+}
+
+static void
+axfr_refresh(axfr_config_t *conf)
+{
+    dns_timer_request(&conf->ac_timer, conf->ac_retry * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+    axfr_do_axfr(conf);
 }

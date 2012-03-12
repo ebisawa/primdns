@@ -58,18 +58,6 @@ typedef struct {
 
 /* network byte order */
 typedef struct {
-    uint32_t        df_magic;
-    uint16_t        df_zero;
-    uint16_t        df_version;
-    uint32_t        df_hashsize;
-    uint32_t        df_serial;
-    uint32_t        df_refresh;
-    uint32_t        df_retry;
-    uint32_t        df_expire;
-} __attribute__((packed)) data_header_t;
-
-/* network byte order */
-typedef struct {
     uint32_t        dh_offset;
     uint32_t        dh_count;
 } __attribute__((packed)) data_hash_t;
@@ -147,6 +135,12 @@ dns_data_printstats(int s)
     dns_util_sendf(s, "\n");
 }
 
+data_header_t *
+dns_data_getheader(void *dataconf)
+{
+    return (data_header_t *) ((data_config_t *) dataconf)->conf_data;
+}
+
 static int
 data_setarg(dns_engine_param_t *ep, char *arg)
 {
@@ -201,7 +195,7 @@ data_init(dns_engine_param_t *ep)
     conf->conf_datasize = size;
     conf->conf_hashsize = ntohl(header->df_hashsize);
 
-    plog(LOG_INFO, "zone \"%s\": serial %u", ep->ep_zone->z_name, ntohl(header->df_serial));
+    plog(LOG_INFO, "%s: zone \"%s\": serial %u", MODULE, ep->ep_zone->z_name, ntohl(header->df_serial));
 
     return 0;
 }

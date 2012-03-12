@@ -33,6 +33,8 @@
 #include "dns_list.h"
 #include "dns_acl.h"
 
+#define DNS_CONFIG_ZONE_NAME_MAX   128
+
 typedef struct {
     dns_list_elem_t            ze_elem;
     void                      *ze_engine;
@@ -49,7 +51,7 @@ typedef struct {
 
 typedef struct {
     dns_list_elem_t            z_elem;
-    char                       z_name[128];
+    char                       z_name[DNS_CONFIG_ZONE_NAME_MAX];
     int                        z_class;
     dns_config_zone_search_t   z_search;
     dns_config_zone_slaves_t   z_slaves;

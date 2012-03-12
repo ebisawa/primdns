@@ -43,7 +43,7 @@ struct dns_timer {
 
 int dns_timer_request(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param);
 int dns_timer_cancel(dns_timer_t *timer);
-int dns_timer_nextimo(struct timeval *timo);
+int dns_timer_next_timeout(struct timeval *timo);
 void dns_timer_execute();
 
 #endif
