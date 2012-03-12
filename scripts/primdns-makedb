@@ -154,6 +154,10 @@ class DataFile
     end
   end
 
+  def ok?
+    @serial != 0
+  end
+
   def push_records(records)
     records.each do |rec|
       index = hash_index(rec.r_name)
@@ -533,9 +537,14 @@ class TinyZone < BaseZone
       datafile.push_records(r) if r != nil
     end
 
-    backup_db(dstname)
-    open(dstname, 'w') do |io|
-      datafile.write_file(io)
+    if datafile.ok?
+      backup_db(dstname)
+      open(dstname, 'w') do |io|
+        datafile.write_file(io)
+      end
+      return true
+    else
+      return false
     end
   end
 
@@ -658,9 +667,14 @@ class BindZone < BaseZone
       datafile.push_records(r)
     end
 
-    backup_db(dstname)
-    open(dstname, 'w') do |io|
-      datafile.write_file(io)
+    if datafile.ok?
+      backup_db(dstname)
+      open(dstname, 'w') do |io|
+        datafile.write_file(io)
+      end
+      return true
+    else
+      return false
     end
   end
 
@@ -954,6 +968,7 @@ end
 
 converter = $options[:tinyzone] ? TinyZone.new : BindZone.new
 lines = getsource(src)
-converter.makedb(dst, lines)
 
-sighup if $options[:sighup]
+if converter.makedb(dst, lines)
+  sighup if $options[:sighup]
+end
