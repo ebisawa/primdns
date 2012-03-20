@@ -60,7 +60,7 @@ static int main_make_pidfile(void);
 static int main_loop(void);
 static void main_init_signal(void);
 static void main_signal_handler(int signum);
-static void main_signal_proc(int signum, void (*proc_func)(void));
+static void main_signal_proc(void);
 static void main_sighup_proc(void);
 static void main_sigterm_proc(void);
 
@@ -75,7 +75,18 @@ static char *ConfNames[] = {
     "etc/primdns/primd.conf",
 };
 
+static struct {
+    int sig_no;
+    void (*sig_func)(void);
+} SignalTable[] = {
+    { SIGHUP,   main_sighup_proc  },
+    { SIGINT,   main_sigterm_proc },
+    { SIGTERM,  main_sigterm_proc },
+    { SIGPIPE,  NULL              },
+};
+
 static uint32_t SignalReceived;
+
 
 int
 main(int argc, char *argv[])
@@ -370,11 +381,9 @@ main_loop(void)
 {
     for (;;) {
         dns_sock_proc();
-        dns_sock_timer_proc();
+        dns_sock_timer_proc();  /* XXX */
         dns_timer_execute();
-
-        main_signal_proc(SIGHUP, main_sighup_proc);
-        main_signal_proc(SIGTERM, main_sigterm_proc);
+        main_signal_proc();
     }
 
     return 0;
@@ -383,35 +392,37 @@ main_loop(void)
 static void
 main_init_signal(void)
 {
-    signal(SIGHUP, main_signal_handler);
-    signal(SIGTERM, main_signal_handler);
-    signal(SIGPIPE, SIG_IGN);
+    int i;
+
+    for (i = 0; i < NELEMS(SignalTable); i++) {
+        if (SignalTable[i].sig_no >= 32)
+            plog(LOG_CRIT, "XXX signal number must be less than 32");
+
+        if (SignalTable[i].sig_func == NULL)
+            signal(SignalTable[i].sig_no, SIG_IGN);
+        else
+            signal(SignalTable[i].sig_no, main_signal_handler);
+    }
 }
 
 static void
 main_signal_handler(int signum)
 {
-#if SIGHUP > 31 || SIGTERM > 31
-#error "XXX signal number must be less than 32"
-#endif
-
-    switch (signum) {
-    case SIGHUP:
-    case SIGTERM:
-        SignalReceived |= (1 << signum);
-        break;
-    }
+    SignalReceived |= (1 << signum);
 }
 
 static void
-main_signal_proc(int signum, void (*proc_func)(void))
+main_signal_proc(void)
 {
+    int i;
     uint32_t sigflag;
 
-    sigflag = 1 << signum;
-    if (SignalReceived & sigflag) {
-        SignalReceived &= ~sigflag;
-        proc_func();
+    for (i = 0; i < NELEMS(SignalTable); i++) {
+        sigflag = 1 << SignalTable[i].sig_no;
+        if (SignalReceived & sigflag) {
+            SignalReceived &= ~sigflag;
+            SignalTable[i].sig_func();
+        }
     }
 }
 
