@@ -109,7 +109,7 @@ dns_config_update(char *filename)
         return -1;
     }
 
-    plog(LOG_DEBUG, "%s: config = %s", MODULE, filename);
+    plog(LOG_DEBUG, "%s: read config: %s", MODULE, filename);
 
     if ((ConfigRoot = config_read(filename)) == NULL) {
         plog(LOG_ERR, "%s: config read failed", MODULE);
@@ -117,6 +117,20 @@ dns_config_update(char *filename)
     }
 
     if (old_root != NULL) {
+        config_wait_update();
+        config_free(old_root);
+    }
+
+    return 0;
+}
+
+int
+dns_config_shutdown(void)
+{
+    dns_config_root_t *old_root = ConfigRoot;
+
+    if (old_root != NULL) {
+        ConfigRoot = NULL;
         config_wait_update();
         config_free(old_root);
     }

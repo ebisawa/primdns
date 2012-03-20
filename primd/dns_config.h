@@ -62,6 +62,7 @@ typedef struct {
 } dns_config_root_t;
 
 int dns_config_update(char *name);
+int dns_config_shutdown(void);
 dns_config_zone_t *dns_config_find_zone(char *name, int class);
 
 extern dns_config_root_t *ConfigRoot;

@@ -135,6 +135,7 @@ axfr_destroy(dns_engine_param_t *ep)
         dns_engine_destroy(&DataEngine, conf->ac_dataconf);
         free(conf->ac_dataconf);
         conf->ac_dataconf = NULL;
+        unlink(conf->ac_datname);
     }
 
     return 0;

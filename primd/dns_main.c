@@ -442,6 +442,7 @@ static void
 main_sigterm_proc(void)
 {
     plog(LOG_INFO, "SIGTERM received. shutting down...");
+    dns_config_shutdown();
     unlink(PATH_PID);
     exit(EXIT_SUCCESS);
 }

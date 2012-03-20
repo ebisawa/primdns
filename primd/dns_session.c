@@ -174,6 +174,9 @@ dns_session_start_thread(int threads)
 int
 dns_session_request(dns_sock_t *sock, int thread_id)
 {
+    if (ConfigRoot == NULL)
+        return -1;
+
     if (WorkerSessions == NULL)
         return session_request_basic(sock, thread_id);
     else
