@@ -99,8 +99,7 @@ axfr_setarg(dns_engine_param_t *ep, char *arg)
 static int
 axfr_init(dns_engine_param_t *ep)
 {
-    unsigned refresh, expire;
-    data_header_t *header;
+    uint32_t refresh, retry, expire;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
     dns_util_strlcpy(conf->ac_zonename, ep->ep_zone->z_name, sizeof(conf->ac_zonename));
@@ -117,14 +116,13 @@ axfr_init(dns_engine_param_t *ep)
         conf->ac_retry = AXFR_RETRY_DEFAULT;
         conf->ac_expire_time = time(NULL) + AXFR_EXPIRE_DEFAULT;
     } else {
-        header = dns_data_getheader(conf->ac_dataconf);
+        dns_data_getsoa(NULL, &refresh, &retry, &expire, conf->ac_dataconf);
         plog(LOG_INFO, "%s: zone \"%s\": refresh %u, retry %u, expire %u",
-             MODULE, ep->ep_zone->z_name,
-             ntohl(header->df_refresh), ntohl(header->df_retry), ntohl(header->df_expire));
+             MODULE, ep->ep_zone->z_name, refresh, retry, expire);
 
-        expire = axfr_adjust_timer(ntohl(header->df_expire), AXFR_EXPIRE_MAX);
-        refresh = axfr_adjust_timer(ntohl(header->df_refresh), AXFR_REFRESH_MAX);
-        conf->ac_retry = axfr_adjust_timer(ntohl(header->df_retry), refresh);
+        refresh = axfr_adjust_timer(refresh, AXFR_REFRESH_MAX);
+        expire = axfr_adjust_timer(expire, AXFR_EXPIRE_MAX);
+        conf->ac_retry = axfr_adjust_timer(retry, expire);
         conf->ac_expire_time = time(NULL) + expire;
 
         dns_timer_request(&conf->ac_timer, refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
@@ -264,13 +262,21 @@ axfr_dataname(char *buf, int bufsize, char *zone_name)
 static void
 axfr_set_retry_timer(axfr_config_t *conf)
 {
-    dns_timer_request(&conf->ac_timer, conf->ac_retry * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+    unsigned remt, retry;
+
+    remt = conf->ac_expire_time - time(NULL);
+    retry = (remt < conf->ac_retry) ? remt : conf->ac_retry;
+
+    if (retry < AXFR_TIMER_MIN)
+        retry = AXFR_TIMER_MIN;
+
+    dns_timer_request(&conf->ac_timer, retry * 1000, (dns_timer_func_t *) axfr_refresh, conf);
 }
 
 static void
 axfr_refresh(axfr_config_t *conf)
 {
-    if (time(NULL) > conf->ac_expire_time) {
+    if (time(NULL) >= conf->ac_expire_time) {
         plog(LOG_INFO, "%s: zone \"%s\": transfer failed", MODULE, conf->ac_zonename);
 
         unlink(conf->ac_datname);

@@ -58,6 +58,18 @@ typedef struct {
 
 /* network byte order */
 typedef struct {
+    uint32_t        df_magic;
+    uint16_t        df_zero;
+    uint16_t        df_version;
+    uint32_t        df_hashsize;
+    uint32_t        df_serial;
+    uint32_t        df_refresh;
+    uint32_t        df_retry;
+    uint32_t        df_expire;
+} __attribute__((packed)) data_header_t;
+
+/* network byte order */
+typedef struct {
     uint32_t        dh_offset;
     uint32_t        dh_count;
 } __attribute__((packed)) data_hash_t;
@@ -135,10 +147,23 @@ dns_data_printstats(int s)
     dns_util_sendf(s, "\n");
 }
 
-data_header_t *
-dns_data_getheader(void *dataconf)
+void
+dns_data_getsoa(uint32_t *serial, uint32_t *refresh, uint32_t *retry, uint32_t *expire, void *dataconf)
 {
-    return (data_header_t *) ((data_config_t *) dataconf)->conf_data;
+    data_header_t *header;
+
+    if (dataconf != NULL) {
+        header = (data_header_t *) ((data_config_t *) dataconf)->conf_data;
+
+        if (serial != NULL)
+            *serial = ntohl(header->df_serial);
+        if (refresh != NULL)
+            *refresh = ntohl(header->df_refresh);
+        if (retry != NULL)
+            *retry = ntohl(header->df_retry);
+        if (expire != NULL)
+            *expire = ntohl(header->df_expire);
+    }
 }
 
 static int
