@@ -87,7 +87,6 @@ static struct {
 
 static uint32_t SignalReceived;
 
-
 int
 main(int argc, char *argv[])
 {
@@ -121,6 +120,7 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
 
     plog(LOG_INFO, "%s started", PROGNAME);
+    dns_config_notify_all_engines();
     dns_notify_all_slaves();
     main_loop();
 

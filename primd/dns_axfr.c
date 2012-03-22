@@ -46,7 +46,11 @@
 
 #define MODULE "axfr"
 
-#define AXFR_REFRESH_MAX  864000   /* 10 days */
+#define AXFR_TIMER_MIN       5
+#define AXFR_RETRY_DEFAULT   10
+#define AXFR_EXPIRE_DEFAULT  180
+#define AXFR_REFRESH_MAX     864000   /* 10 days */
+#define AXFR_EXPIRE_MAX      5184000  /* 60 days */
 
 typedef struct {
     struct sockaddr_storage   ac_master;
@@ -66,8 +70,9 @@ static int axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote);
 static int axfr_do_axfr(axfr_config_t *conf);
 static int axfr_exec_receiver(char *master_addr, char *zone_name, char *datname);
 static int axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datname);
-static int axfr_adjust_timer(int t, unsigned maximum);
+static int axfr_adjust_timer(int t, unsigned maxi);
 static void axfr_dataname(char *buf, int bufsize, char *zone_name);
+static void axfr_set_retry_timer(axfr_config_t *conf);
 static void axfr_refresh(axfr_config_t *conf);
 
 static char *PrimAxfr = "primdns-axfr";
@@ -106,20 +111,24 @@ axfr_init(dns_engine_param_t *ep)
         return -1;
     }
 
-    if (conf->ac_dataconf == NULL)
-        return 0;
+    if (conf->ac_dataconf == NULL) {
+        plog(LOG_INFO, "%s: zone \"%s\": no data", MODULE, ep->ep_zone->z_name);
 
-    header = dns_data_getheader(conf->ac_dataconf);
-    plog(LOG_INFO, "%s: zone \"%s\": refresh %u, retry %u, expire %u",
-         MODULE, ep->ep_zone->z_name,
-         ntohl(header->df_refresh), ntohl(header->df_retry), ntohl(header->df_expire));
+        conf->ac_retry = AXFR_RETRY_DEFAULT;
+        conf->ac_expire_time = time(NULL) + AXFR_EXPIRE_DEFAULT;
+    } else {
+        header = dns_data_getheader(conf->ac_dataconf);
+        plog(LOG_INFO, "%s: zone \"%s\": refresh %u, retry %u, expire %u",
+             MODULE, ep->ep_zone->z_name,
+             ntohl(header->df_refresh), ntohl(header->df_retry), ntohl(header->df_expire));
 
-    expire = ntohl(header->df_expire);
-    refresh = axfr_adjust_timer(ntohl(header->df_refresh), 0xffffffff);
-    conf->ac_retry = axfr_adjust_timer(ntohl(header->df_retry), expire);
-    conf->ac_expire_time = time(NULL) + expire;
+        expire = axfr_adjust_timer(ntohl(header->df_expire), AXFR_EXPIRE_MAX);
+        refresh = axfr_adjust_timer(ntohl(header->df_refresh), AXFR_REFRESH_MAX);
+        conf->ac_retry = axfr_adjust_timer(ntohl(header->df_retry), refresh);
+        conf->ac_expire_time = time(NULL) + expire;
 
-    dns_timer_request(&conf->ac_timer, refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+        dns_timer_request(&conf->ac_timer, refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+    }
 
     return 0;
 }
@@ -133,9 +142,9 @@ axfr_destroy(dns_engine_param_t *ep)
 
     if (conf->ac_dataconf != NULL) {
         dns_engine_destroy(&DataEngine, conf->ac_dataconf);
+        unlink(conf->ac_datname);
         free(conf->ac_dataconf);
         conf->ac_dataconf = NULL;
-        unlink(conf->ac_datname);
     }
 
     return 0;
@@ -163,11 +172,15 @@ axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
     char maddr[256];
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
-    if (dns_util_sacmp_wop((SA *) &conf->ac_master, remote) != 0) {
-        dns_util_sa2str_wop(maddr, sizeof(maddr), remote);
-        plog(LOG_NOTICE, "%s: invalid NOTIFY from %s", __func__, maddr);
-        return -1;
+    if (remote != NULL) {
+        if (dns_util_sacmp_wop((SA *) &conf->ac_master, remote) != 0) {
+            dns_util_sa2str_wop(maddr, sizeof(maddr), remote);
+            plog(LOG_NOTICE, "%s: invalid NOTIFY from %s", __func__, maddr);
+            return -1;
+        }
     }
+
+    axfr_set_retry_timer(conf);
 
     return axfr_do_axfr(conf);
 }
@@ -178,6 +191,7 @@ axfr_do_axfr(axfr_config_t *conf)
     char maddr[256];
 
     dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
+    plog(LOG_INFO, "%s: zone \"%s\": AXFR request to %s", MODULE, conf->ac_zonename, maddr);
 
     if (axfr_exec_receiver(maddr, conf->ac_zonename, conf->ac_datname) < 0) {
         plog(LOG_ERR, "%s: axfr_exec_receiver() failed", MODULE);
@@ -229,12 +243,14 @@ axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datnam
 }
 
 static int
-axfr_adjust_timer(int t, unsigned maximum)
+axfr_adjust_timer(int t, unsigned maxi)
 {
-    if (t > AXFR_REFRESH_MAX || t < 0)
-        t = AXFR_REFRESH_MAX;
-    if (t > maximum)
-        t = maximum;
+    if (t < AXFR_TIMER_MIN)
+        t = AXFR_TIMER_MIN;
+    if (t > maxi)
+        t = maxi;
+
+    /* XXX randomize */
 
     return t;
 }
@@ -246,15 +262,21 @@ axfr_dataname(char *buf, int bufsize, char *zone_name)
 }
 
 static void
+axfr_set_retry_timer(axfr_config_t *conf)
+{
+    dns_timer_request(&conf->ac_timer, conf->ac_retry * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+}
+
+static void
 axfr_refresh(axfr_config_t *conf)
 {
     if (time(NULL) > conf->ac_expire_time) {
-        plog(LOG_INFO, "%s: zone \"%s\" expired", MODULE, conf->ac_zonename);
+        plog(LOG_INFO, "%s: zone \"%s\": transfer failed", MODULE, conf->ac_zonename);
 
         unlink(conf->ac_datname);
         kill(getpid(), SIGHUP);
     } else {
-        dns_timer_request(&conf->ac_timer, conf->ac_retry * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+        axfr_set_retry_timer(conf);
         axfr_do_axfr(conf);
     }
 }

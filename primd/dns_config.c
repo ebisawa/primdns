@@ -124,7 +124,7 @@ dns_config_update(char *filename)
     return 0;
 }
 
-int
+void
 dns_config_shutdown(void)
 {
     dns_config_root_t *old_root = ConfigRoot;
@@ -134,8 +134,21 @@ dns_config_shutdown(void)
         config_wait_update();
         config_free(old_root);
     }
+}
 
-    return 0;
+void
+dns_config_notify_all_engines(void)
+{
+    dns_config_zone_t *zone;
+
+    if (ConfigRoot == NULL)
+        return;
+
+    zone = (dns_config_zone_t *) dns_list_head(&ConfigRoot->r_zone);
+    while (zone != NULL) {
+        dns_engine_notify(zone, NULL);
+        zone = (dns_config_zone_t *) dns_list_next(&ConfigRoot->r_zone, &zone->z_elem);
+    }
 }
 
 dns_config_zone_t *
