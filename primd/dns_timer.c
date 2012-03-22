@@ -32,6 +32,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <sys/time.h>
+#include "dns_log.h"
 #include "dns_timer.h"
 
 #define TIMER_SEC2USEC(s)   ((s) * 1000 * 1000)
