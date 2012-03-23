@@ -46,18 +46,20 @@
 
 #define MODULE "axfr"
 
-#define AXFR_TIMER_MIN       5
-#define AXFR_RETRY_DEFAULT   10
-#define AXFR_EXPIRE_DEFAULT  180
-#define AXFR_REFRESH_MAX     864000   /* 10 days */
-#define AXFR_EXPIRE_MAX      5184000  /* 60 days */
+#define AXFR_TIMER_MIN             5
+#define AXFR_RETRY_DEFAULT         10
+#define AXFR_EXPIRE_DEFAULT        180
+#define AXFR_REFRESH_MAX           864000   /* 10 days */
+#define AXFR_EXPIRE_MAX            5184000  /* 60 days */
+#define AXFR_NOTIFY_INTERVAL_MIN   5
 
 typedef struct {
     struct sockaddr_storage   ac_master;
     char                      ac_zonename[DNS_CONFIG_ZONE_NAME_MAX];
     char                      ac_datname[256];
-    int                       ac_retry;
+    time_t                    ac_last_notify;
     time_t                    ac_expire_time;
+    int                       ac_retry;
     dns_timer_t               ac_timer;
     void                     *ac_dataconf;
 } axfr_config_t;
@@ -168,6 +170,7 @@ static int
 axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
 {
     char maddr[256];
+    time_t now;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
     if (remote != NULL) {
@@ -178,6 +181,13 @@ axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
         }
     }
 
+    now = time(NULL);
+    if (now < conf->ac_last_notify + AXFR_NOTIFY_INTERVAL_MIN) {
+        plog(LOG_NOTICE, "%s: ignore too frequent NOTIFY from %s", __func__, maddr);
+        return -1;
+    }
+
+    conf->ac_last_notify = now;
     axfr_set_retry_timer(conf);
 
     return axfr_do_axfr(conf);
