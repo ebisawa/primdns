@@ -39,6 +39,7 @@
 
 static void timer_register(dns_timer_t *timer);
 static void timer_unregister(dns_timer_t *timer);
+static int timer_is_registered(dns_timer_t *timer);
 static void timer_chain_next(dns_timer_t *parent, dns_timer_t *timer);
 static void timer_tvafter(struct timeval *tv, int msec);
 static int timer_tvcompare(struct timeval *a, struct timeval *b);
@@ -49,6 +50,11 @@ static dns_timer_t *TimerTail;
 int
 dns_timer_request(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param)
 {
+    if (timer_is_registered(timer)) {
+        plog(LOG_DEBUG, "%s: timer %p has already been registered", __func__, timer);
+        dns_timer_cancel(timer);
+    }
+
     plog(LOG_DEBUG, "%s: request timer %p: %d ms", __func__, timer, msec);
 
     gettimeofday(&timer->t_time, NULL);
@@ -161,6 +167,19 @@ timer_unregister(dns_timer_t *timer)
 
     timer->t_prev = NULL;
     timer->t_next = NULL;
+}
+
+static int
+timer_is_registered(dns_timer_t *timer)
+{
+    dns_timer_t *t;
+
+    for (t = TimerHead; t != NULL; t = t->t_next) {
+        if (t == timer)
+            return 1;
+    }
+
+    return 0;
 }
 
 static void

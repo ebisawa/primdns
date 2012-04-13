@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,10 +27,11 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __DNS_AXFR_H__
-#define __DNS_AXFR_H__
-#include "dns_engine.h"
+#ifndef __DNS_QUERY_H__
+#define __DNS_QUERY_H__
 
-extern dns_engine_t AxfrEngine;
+int dns_query_start(struct sockaddr *to, dns_msg_question_t *q, uint16_t msgid, dns_tls_t *tls);
+void dns_query_finish(int sock);
+int dns_query_receive(dns_msg_resource_t *res, int s, uint16_t msgid);
 
 #endif

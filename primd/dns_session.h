@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,6 +62,7 @@ int dns_session_init(void);
 int dns_session_start_thread(int threads);
 int dns_session_request(dns_sock_t *sock, int thread_id);
 int dns_session_check_config(void);
+dns_tls_t *dns_session_main_tls(void);
 
 void dns_session_printstats(int s);
 

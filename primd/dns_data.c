@@ -131,8 +131,8 @@ dns_engine_t DataEngine = {
     data_init,
     data_destroy,
     data_query,
-    data_dumpnext,
     NULL,  /* notify */
+    data_dumpnext,
 };
 
 void

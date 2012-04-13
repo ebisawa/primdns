@@ -434,7 +434,7 @@ main_sighup_proc(void)
     dns_config_update(Options.opt_config);
     dns_cache_invalidate(NULL);
 
-    plog(LOG_INFO, "config updated");
+    plog(LOG_INFO, "reconfigured");
     dns_notify_all_slaves();
 }
 

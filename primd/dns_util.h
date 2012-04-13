@@ -72,6 +72,7 @@ int dns_util_getgid(char *group);
 int dns_util_setugid(int uid, int gid);
 int dns_util_fexist(char *filename);
 int dns_util_spawn(char *cmd, char **argv, int stdout);
+int dns_util_is_greater_serial(uint32_t serial, uint32_t serial_orig);
 unsigned dns_util_hash_initial(void);
 unsigned dns_util_hash_calc(void *buf, int len, unsigned basis);
 unsigned dns_util_euler_primish(unsigned n);

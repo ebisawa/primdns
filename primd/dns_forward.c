@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,8 +69,8 @@ dns_engine_t ForwardEngine = {
     NULL,  /* init */
     NULL,  /* destroy */
     forward_query,
-    NULL,  /* dump */
     NULL,  /* notify */
+    NULL,  /* dump */
 };
 
 static int

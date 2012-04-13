@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -166,7 +166,7 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
 }
 
 int
-dns_engine_notify(dns_config_zone_t *zone, struct sockaddr *remote)
+dns_engine_notify(dns_config_zone_t *zone, struct sockaddr *remote, dns_tls_t *tls)
 {
     int result = -1;
     dns_engine_t *engine;
@@ -182,7 +182,7 @@ dns_engine_notify(dns_config_zone_t *zone, struct sockaddr *remote)
             param.ep_zone = zone;
             param.ep_conf = ze->ze_econf;
 
-            if (engine->eng_notify(&param, remote) >= 0)
+            if (engine->eng_notify(&param, remote, tls) >= 0)
                 result = 0;
         }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -66,8 +66,8 @@ typedef struct {
 } session_stats_t;
 
 static int NumWorkers;
-static dns_session_t *WorkerSessions;
 static dns_session_t MainSessions[DNS_SOCK_THREADS + 1];
+static dns_session_t *WorkerSessions;
 static session_stats_t SessionStats;
 
 static dns_babq_t InQueue, OutQueue;
@@ -202,6 +202,12 @@ dns_session_check_config(void)
     }
 
     return 0;
+}
+
+dns_tls_t *
+dns_session_main_tls(void)
+{
+    return &MainSessions[0].sess_tls;
 }
 
 void
@@ -490,7 +496,7 @@ session_request_notify(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
     ATOMIC_INC(&SessionStats.stat_notify);
 
-    if (dns_engine_notify(session->sess_zone, (SA *) &sbuf->sb_remote) < 0)
+    if (dns_engine_notify(session->sess_zone, (SA *) &sbuf->sb_remote, &session->sess_tls) < 0)
         return -1;
     if (session_make_notify_response(sbuf, session) < 0)
         return DNS_RCODE_SERVFAIL;

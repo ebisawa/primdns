@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2011-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,6 +43,7 @@
 #include "dns_engine.h"
 #include "dns_timer.h"
 #include "dns_util.h"
+#include "dns_query.h"
 
 #define MODULE "axfr"
 
@@ -52,14 +53,18 @@
 #define AXFR_REFRESH_MAX           864000   /* 10 days */
 #define AXFR_EXPIRE_MAX            5184000  /* 60 days */
 #define AXFR_NOTIFY_INTERVAL_MIN   5
+#define AXFR_QUERY_TIMEOUT         5
 
 typedef struct {
     struct sockaddr_storage   ac_master;
-    char                      ac_zonename[DNS_CONFIG_ZONE_NAME_MAX];
+    char                      ac_zone_name[DNS_CONFIG_ZONE_NAME_MAX];
     char                      ac_datname[256];
-    time_t                    ac_last_notify;
-    time_t                    ac_expire_time;
+    uint32_t                  ac_serial;
+    int                       ac_refresh;
     int                       ac_retry;
+    int                       ac_expire;
+    time_t                    ac_expire_time;
+    time_t                    ac_last_notify;
     dns_timer_t               ac_timer;
     void                     *ac_dataconf;
 } axfr_config_t;
@@ -68,14 +73,16 @@ static int axfr_setarg(dns_engine_param_t *ep, char *arg);
 static int axfr_init(dns_engine_param_t *ep);
 static int axfr_destroy(dns_engine_param_t *ep);
 static int axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
-static int axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote);
-static int axfr_do_axfr(axfr_config_t *conf);
+static int axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote, dns_tls_t *tls);
+static int axfr_do_axfr(axfr_config_t *conf, dns_tls_t *tls);
 static int axfr_exec_receiver(char *master_addr, char *zone_name, char *datname);
 static int axfr_init_data_engine(dns_config_zone_t *zone, axfr_config_t *conf, char *datname);
 static int axfr_adjust_timer(int t, unsigned maxi);
 static void axfr_dataname(char *buf, int bufsize, char *zone_name);
 static void axfr_set_retry_timer(axfr_config_t *conf);
 static void axfr_refresh(axfr_config_t *conf);
+static int axfr_need_refresh(axfr_config_t *conf, dns_tls_t *tls);
+static uint32_t axfr_query_soa_serial(struct sockaddr *to, char *zone_name, dns_tls_t *tls);
 
 static char *PrimAxfr = "primdns-axfr";
 
@@ -86,8 +93,8 @@ dns_engine_t AxfrEngine = {
     axfr_init,
     axfr_destroy,
     axfr_query,
-    NULL,  /* dump */
     axfr_notify,
+    NULL,  /* dump */
 };
 
 static int
@@ -101,10 +108,10 @@ axfr_setarg(dns_engine_param_t *ep, char *arg)
 static int
 axfr_init(dns_engine_param_t *ep)
 {
-    uint32_t refresh, retry, expire;
+    uint32_t serial, refresh, retry, expire;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
-    dns_util_strlcpy(conf->ac_zonename, ep->ep_zone->z_name, sizeof(conf->ac_zonename));
+    dns_util_strlcpy(conf->ac_zone_name, ep->ep_zone->z_name, sizeof(conf->ac_zone_name));
     axfr_dataname(conf->ac_datname, sizeof(conf->ac_datname), ep->ep_zone->z_name);
 
     if (axfr_init_data_engine(ep->ep_zone, conf, conf->ac_datname) < 0) {
@@ -118,16 +125,18 @@ axfr_init(dns_engine_param_t *ep)
         conf->ac_retry = AXFR_RETRY_DEFAULT;
         conf->ac_expire_time = time(NULL) + AXFR_EXPIRE_DEFAULT;
     } else {
-        dns_data_getsoa(NULL, &refresh, &retry, &expire, conf->ac_dataconf);
+        dns_data_getsoa(&serial, &refresh, &retry, &expire, conf->ac_dataconf);
+
         plog(LOG_INFO, "%s: zone \"%s\": refresh %u, retry %u, expire %u",
              MODULE, ep->ep_zone->z_name, refresh, retry, expire);
 
-        refresh = axfr_adjust_timer(refresh, AXFR_REFRESH_MAX);
-        expire = axfr_adjust_timer(expire, AXFR_EXPIRE_MAX);
-        conf->ac_retry = axfr_adjust_timer(retry, expire);
-        conf->ac_expire_time = time(NULL) + expire;
+        conf->ac_serial = serial;
+        conf->ac_expire = axfr_adjust_timer(expire, AXFR_EXPIRE_MAX);
+        conf->ac_refresh = axfr_adjust_timer(refresh, AXFR_REFRESH_MAX);
+        conf->ac_retry = axfr_adjust_timer(retry, conf->ac_expire);
+        conf->ac_expire_time = time(NULL) + conf->ac_expire;
 
-        dns_timer_request(&conf->ac_timer, refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+        dns_timer_request(&conf->ac_timer, conf->ac_refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
     }
 
     return 0;
@@ -167,41 +176,53 @@ axfr_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t 
 
 /* must be threadsafe */
 static int
-axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote)
+axfr_notify(dns_engine_param_t *ep, struct sockaddr *remote, dns_tls_t *tls)
 {
     char maddr[256];
     time_t now;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
+    now = time(NULL);
+
     if (remote != NULL) {
+        dns_util_sa2str_wop(maddr, sizeof(maddr), remote);
+        plog(LOG_INFO, "%s: NOIFY received from %s", MODULE, maddr);
+
         if (dns_util_sacmp_wop((SA *) &conf->ac_master, remote) != 0) {
-            dns_util_sa2str_wop(maddr, sizeof(maddr), remote);
-            plog(LOG_NOTICE, "%s: invalid NOTIFY from %s", __func__, maddr);
+            plog(LOG_NOTICE, "%s: invalid NOTIFY", __func__);
+            return -1;
+        }
+
+        if (now < conf->ac_last_notify + AXFR_NOTIFY_INTERVAL_MIN) {
+            plog(LOG_NOTICE, "%s: ignore too frequent NOTIFY", __func__);
             return -1;
         }
     }
 
-    now = time(NULL);
-    if (now < conf->ac_last_notify + AXFR_NOTIFY_INTERVAL_MIN) {
-        plog(LOG_NOTICE, "%s: ignore too frequent NOTIFY from %s", __func__, maddr);
-        return -1;
-    }
-
     conf->ac_last_notify = now;
-    axfr_set_retry_timer(conf);
 
-    return axfr_do_axfr(conf);
+    return axfr_do_axfr(conf, tls);
 }
 
 static int
-axfr_do_axfr(axfr_config_t *conf)
+axfr_do_axfr(axfr_config_t *conf, dns_tls_t *tls)
 {
     char maddr[256];
+    uint32_t serial_new;
+    struct sockaddr_storage ss;
+
+    if (!axfr_need_refresh(conf, tls)) {
+        conf->ac_expire_time = time(NULL) + conf->ac_expire;
+        dns_timer_request(&conf->ac_timer, conf->ac_refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+        return 0;
+    }
+
+    axfr_set_retry_timer(conf);
 
     dns_util_sa2str_wop(maddr, sizeof(maddr), (SA *) &conf->ac_master);
-    plog(LOG_INFO, "%s: zone \"%s\": AXFR request to %s", MODULE, conf->ac_zonename, maddr);
+    plog(LOG_INFO, "%s: zone \"%s\": AXFR request to %s", MODULE, conf->ac_zone_name, maddr);
 
-    if (axfr_exec_receiver(maddr, conf->ac_zonename, conf->ac_datname) < 0) {
+    if (axfr_exec_receiver(maddr, conf->ac_zone_name, conf->ac_datname) < 0) {
         plog(LOG_ERR, "%s: axfr_exec_receiver() failed", MODULE);
         unlink(conf->ac_datname);
         return -1;
@@ -286,13 +307,82 @@ axfr_set_retry_timer(axfr_config_t *conf)
 static void
 axfr_refresh(axfr_config_t *conf)
 {
+    dns_tls_t *tls;
+
     if (time(NULL) >= conf->ac_expire_time) {
-        plog(LOG_INFO, "%s: zone \"%s\": transfer failed", MODULE, conf->ac_zonename);
+        plog(LOG_INFO, "%s: zone \"%s\": transfer failed", MODULE, conf->ac_zone_name);
 
         unlink(conf->ac_datname);
         kill(getpid(), SIGHUP);
     } else {
-        axfr_set_retry_timer(conf);
-        axfr_do_axfr(conf);
+        /* assume main thread */
+        tls = dns_session_main_tls();
+        axfr_do_axfr(conf, tls);
     }
+}
+
+static int
+axfr_need_refresh(axfr_config_t *conf, dns_tls_t *tls)
+{
+    uint32_t serial_new;
+    struct sockaddr_storage ss;
+
+    if (conf->ac_dataconf != NULL && SALEN(&conf->ac_master) > 0) {
+        dns_util_sacopy((SA *) &ss, (SA *) &conf->ac_master);
+        dns_util_sasetport((SA *) &ss, DNS_PORT);
+
+        plog(LOG_DEBUG, "%s: zone \"%s\": query master's zone serial",
+             MODULE, conf->ac_zone_name);
+
+        serial_new = axfr_query_soa_serial((SA *) &ss, conf->ac_zone_name, tls);
+
+        plog(LOG_INFO, "%s: zone \"%s\": master's serial %u, our serial %u",
+             MODULE, conf->ac_zone_name, serial_new, conf->ac_serial);
+
+        if (serial_new != 0 && !dns_util_is_greater_serial(serial_new, conf->ac_serial)) {
+            plog(LOG_INFO, "%s: zone \"%s\" is up-to-date", MODULE, conf->ac_zone_name);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static uint32_t
+axfr_query_soa_serial(struct sockaddr *to, char *zone_name, dns_tls_t *tls)
+{
+    int s;
+    uint16_t msgid;
+    uint32_t serial;
+    dns_msg_question_t q;
+    dns_msg_resource_t res;
+
+    dns_util_strlcpy(q.mq_name, zone_name, sizeof(q.mq_name));
+    q.mq_type = DNS_TYPE_SOA;
+    q.mq_class = DNS_CLASS_IN;
+
+    msgid = xarc4random(&tls->tls_arctx);
+    if ((s = dns_query_start(to, &q, msgid, tls)) < 0) {
+        plog(LOG_ERR, "%s: dns_query_start() failed", MODULE);
+        return 0;
+    }
+
+    if (dns_util_select(s, AXFR_QUERY_TIMEOUT) < 0) {
+        plog(LOG_ERR, "%s: dns_util_select() failed", MODULE);
+        goto error;
+    }
+
+    if (dns_query_receive(&res, s, msgid) < 0) {
+        plog(LOG_ERR, "%s: dns_query_receive() failed", MODULE);
+        goto error;
+    }
+
+    dns_query_finish(s);
+    dns_msg_parse_soa(NULL, NULL,  &serial, NULL, NULL, NULL, NULL, &res);
+
+    return serial;
+
+error:
+    dns_query_finish(s);
+    return 0;
 }

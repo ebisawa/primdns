@@ -400,7 +400,7 @@ dns_util_spawn(char *cmd, char **argv, int stdout)
 
         if (pgchild == 0) {
             if (execvp(cmd, argv) < 0) {
-                plog(LOG_ERR, "%s: execvp() faild: %s", MODULE, cmd);
+                plog_error(LOG_ERR, MODULE, "execvp() faild: %s", cmd);
                 exit(EXIT_FAILURE);
             }
         }
@@ -420,6 +420,27 @@ dns_util_spawn(char *cmd, char **argv, int stdout)
     }
 
     return 0;
+}
+
+int
+dns_util_is_greater_serial(uint32_t serial, uint32_t serial_orig)
+{
+    /*
+     * RFC1982 3.2. says:
+     * s1 is said to be greater than s2 if, and only if,
+     * s1 is not equal to s2, and
+     *
+     * (i1 < i2 and i2 - i1 > 2^(SERIAL_BITS - 1)) or
+     * (i1 > i2 and i1 - i2 < 2^(SERIAL_BITS - 1)
+     */
+
+    /* 2^(32 -1) = 2147483648 */
+    if ((serial < serial_orig && serial_orig - serial > 2147483648U) ||
+        (serial > serial_orig && serial - serial_orig < 2147483648U)) {
+        return 1;
+    }
+
+    return 0;  /* less, equal or undefined */
 }
 
 unsigned

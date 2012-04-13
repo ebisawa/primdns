@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -139,14 +139,18 @@ dns_config_shutdown(void)
 void
 dns_config_notify_all_engines(void)
 {
+    dns_tls_t *tls;
     dns_config_zone_t *zone;
 
     if (ConfigRoot == NULL)
         return;
 
+    /* assume this is the main thread */
+    tls = dns_session_main_tls();
     zone = (dns_config_zone_t *) dns_list_head(&ConfigRoot->r_zone);
+
     while (zone != NULL) {
-        dns_engine_notify(zone, NULL);
+        dns_engine_notify(zone, NULL, tls);
         zone = (dns_config_zone_t *) dns_list_next(&ConfigRoot->r_zone, &zone->z_elem);
     }
 }
