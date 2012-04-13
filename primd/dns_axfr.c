@@ -111,7 +111,7 @@ axfr_init(dns_engine_param_t *ep)
     uint32_t serial, refresh, retry, expire;
     axfr_config_t *conf = (axfr_config_t *) ep->ep_conf;
 
-    dns_util_strlcpy(conf->ac_zone_name, ep->ep_zone->z_name, sizeof(conf->ac_zone_name));
+    STRLCPY(conf->ac_zone_name, ep->ep_zone->z_name, sizeof(conf->ac_zone_name));
     axfr_dataname(conf->ac_datname, sizeof(conf->ac_datname), ep->ep_zone->z_name);
 
     if (axfr_init_data_engine(ep->ep_zone, conf, conf->ac_datname) < 0) {
@@ -357,7 +357,7 @@ axfr_query_soa_serial(struct sockaddr *to, char *zone_name, dns_tls_t *tls)
     dns_msg_question_t q;
     dns_msg_resource_t res;
 
-    dns_util_strlcpy(q.mq_name, zone_name, sizeof(q.mq_name));
+    STRLCPY(q.mq_name, zone_name, sizeof(q.mq_name));
     q.mq_type = DNS_TYPE_SOA;
     q.mq_class = DNS_CLASS_IN;
 
