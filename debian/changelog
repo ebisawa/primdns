@@ -1,8 +1,8 @@
-primdns (0.8-pre1) unstable; urgency=low
+primdns (0.8) unstable; urgency=low
 
-  * 0.8-pre1
+  * 0.8
 
- -- Satoshi Ebisawa <ebisawa@gmail.com>  Tue, 17 May 2011 23:07:29 +0900
+ -- Satoshi Ebisawa <ebisawa@gmail.com>  Fri, 13 Apr 2012 22:18:31 +0900
 
 primdns (0.6) unstable; urgency=low
 
