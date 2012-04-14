@@ -53,7 +53,9 @@ static void main_arginit(char *argv0);
 static void main_args(int argc, char *argv[]);
 static void main_usage(void);
 static void main_version(void);
-static void main_mydir(char *buf, int bufmax, char *argv0);
+static void main_basedir(char *buf, int bufmax, char *argv0);
+static void main_confdir(char *confdir, int confdir_max, char *confpath);
+static int main_realargv0(char *argv0, char *real);
 static int main_findconf(char *basedir);
 static int main_init(void);
 static int main_make_pidfile(void);
@@ -70,9 +72,9 @@ char ConfPath[PATH_MAX];
 char ConfDir[PATH_MAX];
 
 static char *ConfNames[] = {
-    "etc/primd.conf",
-    "etc/primd/primd.conf",
     "etc/primdns/primd.conf",
+    "etc/primd/primd.conf",
+    "etc/primd.conf",
 };
 
 static struct {
@@ -92,10 +94,10 @@ main(int argc, char *argv[])
 {
     main_arginit(argv[0]);
     main_args(argc, argv);
+    main_confdir(ConfDir, sizeof(ConfDir), ConfPath);
     main_init_signal();
 
-    if (dns_config_update(Options.opt_config) < 0)
-        return EXIT_FAILURE;
+    plog(LOG_DEBUG, "%s: confdir = %s", __func__, ConfDir);
 
     if (!Options.opt_foreground) {
         plog_setflag(DNS_LOG_FLAG_SYSLOG);
@@ -104,6 +106,9 @@ main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
     }
+
+    if (dns_config_update(Options.opt_config) < 0)
+        return EXIT_FAILURE;
 
     if (main_init() < 0)
         return EXIT_FAILURE;
@@ -127,53 +132,14 @@ main(int argc, char *argv[])
     return EXIT_SUCCESS;
 }
 
-static int
-main_findconf(char *basedir)
-{
-    int i;
-    char *p, buf[PATH_MAX], rbuf[PATH_MAX];
-
-    for (i = 0; i < NELEMS(ConfNames); i++) {
-        snprintf(buf, sizeof(buf), "%s/%s", basedir, ConfNames[i]);
-        if (realpath(buf, rbuf) == NULL)
-            continue;
-
-        if (dns_util_fexist(rbuf)) {
-            STRLCPY(ConfPath, rbuf, sizeof(ConfPath));
-            if (realpath(rbuf, ConfDir) == NULL) {
-                plog_error(LOG_ERR, MODULE, "realpath() failed: %s", rbuf);
-                return -1;
-            }
-
-            if ((p = strrchr(ConfDir, '/')) != NULL)
-                *p = 0;
-
-            return 0;
-        }
-    }
-
-    return -1;
-}
-
-static void
-main_mydir(char *buf, int bufmax, char *argv0)
-{
-    char *p;
-
-    STRLCPY(buf, argv0, bufmax);
-    if ((p = strrchr(buf, '/')) != NULL)
-        *p = 0;
-
-    STRLCAT(buf, "/..", bufmax);
-}
-
 static void
 main_arginit(char *argv0)
 {
-    char mydir[PATH_MAX];
+    char basedir[PATH_MAX];
 
-    main_mydir(mydir, sizeof(mydir), argv0);
-    if (main_findconf(mydir) < 0)
+    main_basedir(basedir, sizeof(basedir), argv0);
+
+    if (main_findconf(basedir) < 0)
         main_findconf("");
 
     Options.opt_config = ConfPath;
@@ -214,7 +180,8 @@ main_args(int argc, char *argv[])
                     fprintf(stderr, "error: missing config file name\n");
                     exit(EXIT_FAILURE);
                 }
-                Options.opt_config = argv[i];
+                STRLCPY(ConfPath, argv[i], sizeof(ConfPath));
+                Options.opt_config = ConfPath;
                 break;
             case 'd':
                 if (Options.opt_debug)
@@ -324,6 +291,87 @@ main_version(void)
 {
     puts(PACKAGE_STRING);
     exit(EXIT_FAILURE);
+}
+
+static void
+main_basedir(char *buf, int bufmax, char *argv0)
+{
+    char *p, rargv0[PATH_MAX];
+
+    buf[0] = 0;
+
+    if (main_realargv0(argv0, rargv0) < 0)
+        return;
+
+    if ((p = strrchr(rargv0, '/')) != NULL) {
+        *p = 0;
+        if ((p = strrchr(rargv0, '/')) != NULL)
+            *p = 0;
+    }
+
+    STRLCPY(buf, rargv0, bufmax);
+}
+
+static void
+main_confdir(char *confdir, int confdir_max, char *confpath)
+{
+    char *p;
+
+    STRLCPY(confdir, confpath, confdir_max);
+
+    if ((p = strrchr(ConfDir, '/')) != NULL)
+        *p = 0;
+}
+
+static int
+main_realargv0(char *argv0, char *real)
+{
+    char *p, *next, *path, buf[256];
+
+    if (strchr(argv0, '/') != NULL) {
+        if (realpath(argv0, real) == NULL) {
+            plog_error(LOG_ERR, MODULE, "realpath() failed: %s", argv0);
+            return -1;
+        }
+        return 0;
+    } else {
+        if ((path = getenv("PATH")) != NULL) {
+            STRLCPY(buf, path, sizeof(buf));
+            p = buf;
+
+            for (; p != NULL; p = next) {
+                if ((next = strchr(p, ':')) != NULL) {
+                    *next = 0;
+                    next++;
+                }
+
+                snprintf(real, PATH_MAX, "%s/%s", p, argv0);
+                if (dns_util_fexist(real))
+                    return 0;
+            }
+        }
+    }
+
+    return -1;
+}
+
+static int
+main_findconf(char *basedir)
+{
+    int i;
+    char *p, buf[PATH_MAX], rbuf[PATH_MAX];
+
+    for (i = 0; i < NELEMS(ConfNames); i++) {
+        snprintf(buf, sizeof(buf), "%s/%s", basedir, ConfNames[i]);
+        if (realpath(buf, rbuf) == NULL)
+            continue;
+        if (dns_util_fexist(rbuf)) {
+            STRLCPY(ConfPath, rbuf, sizeof(ConfPath));
+            return 0;
+        }
+    }
+
+    return -1;
 }
 
 static int
