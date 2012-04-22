@@ -197,6 +197,15 @@ dns_cache_count_answer(dns_cache_rrset_t *rrset)
     return count;
 }
 
+dns_msg_question_t *
+dns_cache_lastq(dns_cache_rrset_t *rrset)
+{
+    if (rrset->rrset_qcname.mq_name[0] != 0)
+        return &rrset->rrset_qcname;
+    else
+        return &rrset->rrset_question;
+}
+
 void
 dns_cache_negative(dns_cache_rrset_t *rrset, uint32_t ttl)
 {
@@ -227,6 +236,10 @@ dns_cache_merge(dns_cache_rrset_t *rrset, dns_cache_rrset_t *rr_m, dns_tls_t *tl
         dns_cache_add_answer(rrset, &cache->cache_res, tls);
         cache = DNS_CACHE_LIST_NEXT(&rr_m->rrset_list_answer, cache);
     }
+
+    memcpy(&rrset->rrset_qcname, &rr_m->rrset_question, sizeof(rrset->rrset_qcname));
+    rrset->rrset_dns_rcode = rr_m->rrset_dns_rcode;
+    rrset->rrset_dns_flags = rr_m->rrset_dns_flags;
 }
 
 void
@@ -334,6 +347,7 @@ cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls)
 
     memcpy(&rrset->rrset_question, q, sizeof(*q));
     STRLOWER(rrset->rrset_question.mq_name);
+    rrset->rrset_qcname.mq_name[0] = 0;
 
     dns_list_init(&rrset->rrset_list_cname);
     dns_list_init(&rrset->rrset_list_answer);

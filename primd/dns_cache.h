@@ -55,14 +55,15 @@ typedef struct {
 
 typedef struct {
     dns_msg_question_t   rrset_question;
+    dns_msg_question_t   rrset_qcname;
     unsigned             rrset_category;
     unsigned             rrset_refs;
     unsigned             rrset_hits;
     unsigned             rrset_dns_rcode;
     unsigned             rrset_dns_flags;
     time_t               rrset_expire;
-    dns_list_t           rrset_list_cname;
     dns_list_t           rrset_list_answer;
+    dns_list_t           rrset_list_cname;
 } dns_cache_rrset_t;
 
 int dns_cache_init(int cache_mb, int threads);
@@ -71,6 +72,7 @@ dns_cache_rrset_t *dns_cache_lookup(dns_msg_question_t *q, int category, dns_tls
 void dns_cache_release(dns_cache_rrset_t *rrset, dns_tls_t *tls);
 int dns_cache_add_answer(dns_cache_rrset_t *rrset, dns_msg_resource_t *res, dns_tls_t *tls);
 int dns_cache_count_answer(dns_cache_rrset_t *rrset);
+dns_msg_question_t *dns_cache_lastq(dns_cache_rrset_t *rrset);
 void dns_cache_negative(dns_cache_rrset_t *rrset, uint32_t ttl);
 void dns_cache_merge(dns_cache_rrset_t *rrset, dns_cache_rrset_t *rr_m, dns_tls_t *tls);
 void dns_cache_register(dns_cache_rrset_t *rrset, int category, dns_tls_t *tls);

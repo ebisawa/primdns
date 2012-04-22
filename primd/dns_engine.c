@@ -145,7 +145,7 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
             dns_cache_setflags(rrset, engine->eng_flags);
             rcode = dns_cache_getrcode(rrset);
 
-            plog(LOG_DEBUG, "%s: rcode %s (%d)", MODULE, dns_proto_rcode_string(rcode), rcode);
+            plog(LOG_DEBUG, "%s: rcode %d (%s)", MODULE, rcode, dns_proto_rcode_string(rcode));
 
             if (rcode == DNS_RCODE_NOERROR)
                 noerror = 1;
