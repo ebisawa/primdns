@@ -730,7 +730,8 @@ session_query_internal(dns_session_t *session, dns_msg_question_t *q)
 {
     dns_cache_rrset_t *rrset;
 
-    plog(LOG_DEBUG, "%s: internal query: %s %s", MODULE, q->mq_name, dns_proto_type_string(q->mq_type));
+    plog(LOG_DEBUG, "%s: internal query: %s %s %s", MODULE,
+         q->mq_name, dns_proto_class_string(q->mq_class), dns_proto_type_string(q->mq_type));
 
     if ((rrset = dns_cache_lookup(q, DNS_CACHE_INTERNAL, &session->sess_tls)) == NULL) {
         if ((rrset = dns_engine_query(q, session->sess_zone, &session->sess_tls)) == NULL)
