@@ -1,16 +1,13 @@
-primdns - A Simple DNS Contents Server
+primdns - a simple dns contents server
 
 * 特徴
 
-  - シンプルな DNS コンテンツサーバです。
-  - ロックフリー化されたデータ構造とマルチスレッド処理により、
-    複数の CPU コアを搭載したハードウェアにおいて高い性能を発揮します。
-  - リソースの検索に用いる DB エンジンがモジュール化されており、
-    ゾーンごとに使用するエンジンを任意に設定できるほか、複数のエンジンを
-    組み合わせて使用することもできます。
-  - DB エンジン検索結果のキャッシュ機構を備えており、低速な DB を参照する
-    場合であっても実用的な性能を発揮することができます。
-  - BIND 等の設定に用いられる標準的なゾーンファイルをそのまま利用できます。
+  - 必要最低限の機能をコンパクトに実装することを目指した DNS コンテンツサーバです。
+  - マルチスレッド処理により高い性能を発揮します。
+  - モジュール化されたリソース DB エンジンにより、様々な特殊用途に対応可能です。
+  - コンテンツサーバであるにもかかわらず、内部に DB 検索結果のキャッシュ機構を
+    備えています。これにより低速な DB を参照する場合でも実用的な性能を発揮します。
+  - BIND 等の設定に用いられる標準的なゾーンファイル形式をサポートします。
     また、djbdns (tinydns) 形式のデータファイルも利用できます。
 
 * 動作環境
@@ -24,79 +21,69 @@ primdns - A Simple DNS Contents Server
 
   その他に、関連ツールの実行に Ruby が必要です。
 
-* 変更履歴
-
-  - 0.7
-    - 機能追加・変更
-      - IPv6 トランスポート対応
-      - EDNS0 対応 (4096 バイトまで UDP で応答可能)
-      - AXFR によるゾーン転送機能を追加 (マスタサーバ側のみ)
-      - NOTIFY 送信機能を追加 (マスタサーバ側のみ)
-    - 不具合修正
-      - primdns-makedb が ruby 1.9.x 動作しない問題を修正
-      - conf ファイルの読み込みに失敗する問題を修正
-      - ゾーン検索順序が conf ファイル記載順だった問題を修正
-      - TCP による問い合わせと同時に SIGHUP を受けるとデッドロックする問題を修正
-
 * インストール
 
   基本的には configure して make install すればインストールできるように
   なっています。例えば次のようにして configure を実行してください。
 
-    $ ./configure --prefix=/usr/local/primd
+    $ ./configure --prefix=/usr/local/primdns
 
-  この例では /usr/local/primd 以下のディレクトリがインストール先となります。
+  この例では /usr/local/primdns 以下のディレクトリがインストール先となります。
 
   次に、
 
-    $ make install
+    $ make
+    # make install
 
   を実行すると、必要なバイナリのコンパイルとインストールが行われます。
   "Permission denied" 等といったエラーが表示される場合は、インストール先の
   ディレクトリへの書き込み権限を確認してください。
 
   なお、付属のツールの実行に Ruby が必要となりますので、ご利用の環境に
-  未だ Ruby がインストールされていない場合には、別途 Ruby のインストールが
+  Ruby がインストールされていない場合には、別途 Ruby のインストールが
   必要です。
 
 * インストール (Debian)
 
   Debian パッケージをビルドするためのルールファイルを用意していますので、
-  debuild -uc -us -b 等としてパッケージを作成することができます。
+  例えば次のようにして deb パッケージを作成することができます。
 
-  .deb パッケージが作成されたら、dpkg コマンドでインストールします。
+    $ debuild -uc -us -b
+
+  パッケージが作成されたら、dpkg コマンドでインストールします。
+
+    # dpkg -i primdns_0.8_i386.deb
 
 * とりあえず実行してみる
 
   付属のサンプル設定で最低限の動作を確認するまでの手順を次に示します。
-  --prefix=/usr/local/primd として make install した場合の例となっています。
+  以下の記載は、--prefix=/usr/local/primdns として make install した
+  場合の例となっています。
 
   (1) インストール先に PATH を通す
 
     標準でないディレクトリにインストールした場合には、インストール先の
-    ディレクトリに PATH を通します。
+    ディレクトリに PATH を通る必要があります。
 
-      $ export PATH=$PATH:/usr/local/primd/sbin
+      # export PATH=$PATH:/usr/local/primdns/sbin
 
   (2) primdns-updatezone コマンドを実行
 
-    primdns はテキストで記載されたゾーン設定ファイルを事前に専用の
+    primdns はテキストで記載されたゾーンファイルを、事前に専用の
     バイナリ形式にコンパイルする方式を採用しています。これは以下の
     コマンドを実行することにより行うことができます。
 
-      $ /usr/local/primd/sbin/primdns-updatezone
+      # primdns-updatezone
 
   (3) primd の実行
 
     primdns の本体である primd を実行します。
-    ここでは -f オプションを指定してフォアグラウンドで実行します。
 
-      $ /usr/local/primd/sbin/primd -f
+      # primd -c /usr/local/primdns/etc/primd.conf
 
   (4) DNS 問い合わせをしてみる
 
-    dig 等のツールを使ってローカルホスト状の primd に問い合わせを
-    行います。無事応答が返ってくれば成功です。
+    dig 等のツールを使って primd に問い合わせを行います。
 
       $ dig @127.0.0.1 localhost
 
@@ -137,7 +124,7 @@ options:  -4           ipv4 only
 
 * 設定ファイル書式
 
-  zone <DOMAIN_NAME> {
+  zone <DOMAIN_NAME> [ <CLASS> ] {
       search {
           <ENGINE_NAME> <PARAMETER> ;
         [ <ENGINE_NAME> <PARAMETER> ; ]
@@ -172,13 +159,13 @@ options:  -4           ipv4 only
       [設定例]
       zone "localhost" {
         search {
-          data "/etc/primd/localhost.dat";
+          data "localhost.dat";
         };
       };
 
       zone "127.in-addr.arpa" {
         search {
-          data "/etc/primd/127.in-addr.arpa.dat";
+          data "127.in-addr.arpa.dat";
         };
       };
 
@@ -227,41 +214,83 @@ options:  -4           ipv4 only
         };
       };
 
-    - 複数エンジンの利用
+    (4) serverid エンジン
 
-      ゾーン設定の search セクションにおいて複数のエンジンが設定されている
-      場合には、先頭に記述されたものから順に問い合わせを行い、最初に発見
-      された結果を採用し、クライアントに返します。
+      サーバのホスト名、バージョン番号等を変える特別なレコートに応答します。
+      具体的には次のレコードに応答します。
 
-      次の例では、まず最初に外部コマンド実行し、問い合わせのリソースが
-      見つからない場合は、データファイルを参照します。
+        - id.server CH TXT, hostname.bind CH TXT
+          - サーバのホスト名を返します
+        - version.server CH TXT, version.bind CH TXT
+          - サーバのバージョン番号を返します
 
       [設定例]
-      zone "example.org" {
+      zone "server" CH {
         search {
-          external "/usr/local/libexec/example.org.sh";
-          data "/etc/primd/example.org.data";
+          serverid;
         };
       };
 
-      また次の例では、データファイルが複数のファイルに分割されています。
-
-      [設定例]
-      zone "example.org" {
+      zone "bind" CH {
         search {
-          data "/etc/primd/example.org.1.dat";
-          data "/etc/primd/example.org.2.dat";
-          data "/etc/primd/example.org.3.dat";
+          serverid;
         };
       };
+
+    (5) axfr エンジン
+
+      AXFR によるゾーン転送により、指定されたマスタサーバに対するスレーブ
+      サーバとして動作します。
+
+      外部コマンドとして付属スクリプト群を実行するため、これらが PATH の
+      通ったディレクトリにインストールされている必要があります。
+
+      [設定例]
+      zone "example.com" {
+        search {
+          axfr 192.0.2.100;
+        };
+      };
+
+　　   ※ マスタよりゾーン転送を受けるゾーンについて、他のエンジンを併用
+        するとスレーブサーバとしては適切でない動作となる場合があります。
+
+  - 複数エンジンの利用
+
+    ゾーン設定の search セクションにおいて複数のエンジンが設定されている
+    場合には、先頭に記述されたものから順に問い合わせを行い、最初に発見した
+    結果を採用してクライアントに応答します。
+
+    次の例では、まず最初に外部コマンド実行し、問い合わせのリソースが見つから
+    なかった場合に、データファイルを参照します。
+
+    [設定例]
+    zone "example.org" {
+      search {
+        external "/usr/local/libexec/example.org.sh";
+        data "example.org.data";
+      };
+    };
+
+    また次のようにすると、データファイルを複数のファイルに分割できます。
+
+    [設定例]
+    zone "example.org" {
+      search {
+        data "example.org.1.dat";
+        data "example.org.2.dat";
+        data "example.org.3.dat";
+      };
+    };
 
   - slaves
 
     ゾーン転送を許可するスレーブサーバの IP アドレスを記述します。
     ここに記載されたサーバからの AXFR によるゾーン転送を受け付けます。
-    また、起動時および SIGHUP による設定再読み込み時に NOTIFY を送信します。
+    また、当該サーバに対し、起動時および SIGHUP による設定再読み込み時に
+    NOTIFY を送信します。
 
-    data エンジンを使用するゾーンでのみゾーン転送を行うことができます。
+    data エンジンを使用するゾーンのみゾーン転送を行うことができます。
     search リストに複数の data エンジンが含まれる場合、データファイルを
     またがって重複するレコードがないようにしてください。
 
@@ -288,7 +317,7 @@ options:  -4           ipv4 only
   著作権者や貢献者は、本ソフトウェアの使用から発生した損害について一切責任を
   負わないものとします。
 
-  Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
+  Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions
@@ -316,9 +345,39 @@ options:  -4           ipv4 only
   ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
   POSSIBILITY OF SUCH DAMAGE.
 
+* 仕様
+
+  以下の RFC それぞれに記載の仕様の全部または一部が実装されています。
+
+  RFC 1034 - DOMAIN NAMES - CONCEPTS AND FACILITIES
+  RFC 1035 - DOMAIN NAMES - IMPLEMENTATION AND SPECIFICATION
+  RFC 1123 - Requirements for Internet Hosts -- Application and Support
+  RFC 1982 - Serial Number Arithmetic
+  RFC 1996 - A Mechanism for Prompt Notification of Zone Changes (DNS NOTIFY)
+  RFC 2181 - Clarifications to the DNS Specification
+  RFC 2308 - Negative Caching of DNS Queries (DNS NCACHE)
+  RFC 2671 - Extension Mechanisms for DNS (EDNS0)
+  RFC 3596 - DNS Extensions to Support IP Version 6
+  RFC 3597 - Handling of Unknown DNS Resource Record (RR) Types
+  RFC 4343 - Domain Name System (DNS) Case Insensitivity Clarification
+  RFC 5936 - DNS Zone Transfer Protocol (AXFR)
+
+* 制限事項
+
+  現在のところ、ゾーンファイルに記述できるレコードは以下のものに限られます。
+
+    - A
+    - NS
+    - CNAME
+    - SOA
+    - PTR
+    - MX
+    - TXT
+    - AAAA
+
 * 謝辞
 
-  本ソフトウェアの実装にあたり、お世話になった皆様に感謝いたします。
+  本ソフトウェアの実装・公開にあたり、お世話になった皆様に感謝いたします。
 
   Arc4 random number generator for OpenBSD.
   Copyright 1996 David Mazieres <dm@lcs.mit.edu>.
