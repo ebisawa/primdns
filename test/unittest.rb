@@ -50,10 +50,10 @@ class Primd
     @basedir = primd_basedir
   end
 
-  def start
+  def start(index)
     system("#{@basedir}/scripts/primdns-updatezone #{@testdir}")
     fork do
-      exec("#{@basedir}/primd/primd -d -f -p #{@port} -c #{@testdir}/primd.conf >#{@testdir}/test.log")
+      exec("#{@basedir}/primd/primd -d -f -p #{@port} -c #{@testdir}/primd.conf >#{@testdir}/test#{index}.log")
     end
   end
 
@@ -68,14 +68,17 @@ class Primd
 end
 
 class Test
+  @@test_count = 0
+
   def initialize
     @primd = Primd.new
     @digger = Digger.new
     @ok = true
+    @@test_count += 1
   end
 
   def start
-    @primd.start
+    @primd.start(@@test_count)
   end
 
   def finish
