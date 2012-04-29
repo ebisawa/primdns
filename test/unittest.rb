@@ -5,16 +5,16 @@ require 'pp'
 TEST_PORT = 35353
 
 class Digger
-  attr_reader :status, :flags, :records
+  attr_reader :result, :status, :flags, :records
 
   def initialize(addr = '127.0.0.1', port = TEST_PORT)
-    @addr = addr; @port = port
+    @addr = addr; @port = port; @result = ''
     @status = nil; @flags = []; @records = {}
   end
 
   def query(q)
-    r = `dig -p #{@port} @#{@addr} #{q}`
-    parse_result(r)
+    @result = `dig -p #{@port} @#{@addr} #{q}`
+    parse_result(@result)
   end
 
   private
@@ -44,9 +44,9 @@ class Digger
 end
 
 class Primd
-  def initialize(port = TEST_PORT)
+  def initialize(testdir, port = TEST_PORT)
     @port = port
-    @testdir = Pathname.new($0).realpath.dirname
+    @testdir = testdir
     @basedir = primd_basedir
   end
 
@@ -68,10 +68,11 @@ class Primd
 end
 
 class Test
+  @@testdir = Pathname.new($0).realpath.dirname
   @@test_count = 0
 
   def initialize
-    @primd = Primd.new
+    @primd = Primd.new(@@testdir)
     @digger = Digger.new
     @ok = true
     @@test_count += 1
@@ -83,6 +84,10 @@ class Test
 
   def finish
     @primd.stop
+
+    open("#{@@testdir}/test#{@@test_count}.log", 'a') do |io|
+      io.puts @digger.result
+    end
   end
 
   def query(q)
