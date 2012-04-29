@@ -79,7 +79,7 @@ class Test
   end
 
   def start(title)
-    puts "-- [#{@@test_count}] #{title} --"
+    puts "\n>>> [#{File.basename(@@testdir)}:#{@@test_count}] #{title} <<<"
     @primd.start(@@test_count)
   end
 
@@ -116,6 +116,24 @@ class Test
   def assert_noanswer
     @testmethod = current_method
     if @digger.records[:answer] == nil
+      pass
+    else
+      fail
+    end
+  end
+
+  def assert_noauthority
+    @testmethod = current_method
+    if @digger.records[:authority] == nil
+      pass
+    else
+      fail
+    end
+  end
+
+  def assert_noadditional
+    @testmethod = current_method
+    if @digger.records[:additional] == nil
       pass
     else
       fail
@@ -237,6 +255,14 @@ end
 
 def assert_noanswer
   $test.assert_noanswer
+end
+
+def assert_noauthority
+  $test.assert_noauthority
+end
+
+def assert_noadditional
+  $test.assert_noadditional
 end
 
 def assert_answer(rdata, type = nil)

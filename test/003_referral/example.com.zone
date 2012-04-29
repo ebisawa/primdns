@@ -1,0 +1,27 @@
+$ORIGIN	example.com.
+$TTL	1800
+
+@		IN	SOA	ns1.example.com. hostmaster.example.com. (
+					2012042917	; Serial
+					1H		; Refresh
+					5M		; Retry
+					1W		; Expire
+					1H		; Minimum
+				)
+
+		IN	NS	ns1.example.com.
+		IN	NS	ns2.example.com.
+
+ns1		IN	A	192.0.2.1
+ns2		IN	A	192.0.2.2
+ns2		IN	AAAA	2001:db8::2:2
+
+sub1		IN	NS	ns1.sub1.example.com.
+sub1		IN	NS	ns2.sub1.example.com.
+
+sub2		IN	NS	ns1.sub2.example.com.
+sub2		IN	NS	ns2.sub2.example.com.
+ns1.sub2	IN	A	192.0.2.11
+ns1.sub2	IN	AAAA	2001:db8::2:11
+ns2.sub2	IN	A	192.0.2.12
+ns2.sub2	IN	AAAA	2001:db8::2:12
