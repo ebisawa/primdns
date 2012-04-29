@@ -78,7 +78,8 @@ class Test
     @@test_count += 1
   end
 
-  def start
+  def start(title)
+    puts "-- [#{@@test_count}] #{title} --"
     @primd.start(@@test_count)
   end
 
@@ -95,6 +96,7 @@ class Test
   end
 
   def assert_status(status)
+    @testmethod = current_method
     if @digger.status == status
       pass(status)
     else
@@ -103,6 +105,7 @@ class Test
   end
 
   def assert_flags(flag)
+    @testmethod = current_method
     if @digger.flags.include?(flag)
       pass(flag)
     else
@@ -110,58 +113,109 @@ class Test
     end
   end
 
+  def assert_noanswer
+    @testmethod = current_method
+    if @digger.records[:answer] == nil
+      pass
+    else
+      fail
+    end
+  end
+
   def assert_answer(rdata, type = nil)
-    @digger.records[:answer].each do |answer|
-      if type == nil || answer[:type] == type
-        if answer[:rdata] == rdata
-          pass(rdata, type)
-          return
-        end
+    assert_rdata(@digger.records[:answer], rdata, type)
+  end
+
+  def assert_answer_type(type)
+    assert_type(@digger.records[:answer], type)
+  end
+
+  def assert_authority(rdata)
+    assert_rdata(@digger.records[:authority], rdata)
+  end
+
+  def assert_authority_type(type)
+    assert_type(@digger.records[:authority], type)
+  end
+
+  def assert_additional(rdata)
+    assert_rdata(@digger.records[:additional], rdata)
+  end
+
+  def assert_additional_type(type)
+    assert_type(@digger.records[:additional], type)
+  end
+
+  private
+  def assert_rdata(records, rdata, type = nil)
+    @testmethod = caller_method
+    records.each do |r|
+      next if type != nil && r[:type] != type
+      if check_rdata(r[:rdata], rdata)
+        pass(rdata, type)
+        return
       end
     end
     fail(rdata, type)
   end
 
-  def assert_authority(name)
-    @digger.records[:authority].each do |ns|
-      if ns[:rdata] == name
-        pass(name)
-        return
-      end
-    end
-    fail(name)
-  end
-
-  def assert_authority_type(type)
-    @digger.records[:authority].each do |ns|
-      if ns[:type] == type
+  def assert_type(records, type)
+    @testmethod = caller_method
+    records.each do |r|
+      if check_rdata(r[:type], type)
         pass(type)
         return
       end
     end
-    fail(type)
+    fail(rdata, type)
   end
 
-  private
-  def pass(param, type = nil)
-    t = (type != nil) ? "/#{type}" : ''
-    caller_name = caller[0].sub(/.*`(.+)'.*/, '\1')
-    puts "[ PASS ] #{caller_name} \"#{param}\"#{t}"
+  def check_rdata(rdata, adata)
+    cnot = false
+    if adata =~ /^!\s*(.+)$/
+      adata = $1
+      cnot = true
+    end
+
+    if rdata == adata
+      return (cnot) ? false : true
+    else
+      return (cnot) ? true : false
+    end
   end
 
-  def fail(param, type = nil)
-    t = (type != nil) ? "#{type} " : ''
-    caller_name = caller[0].sub(/.*`(.+)'.*/, '\1')
-    puts "[ FAIL ] #{caller_name} \"#{param}\"#{t}"
+  def pass(param = nil, type = nil)
+    t = (type != nil) ? ", #{type}" : ''
+
+    print "[ PASS ] #{@testmethod}"
+    print " \"#{param}\"#{t}" if param != nil
+    print "\n"
+  end
+
+  def fail(param = nil, type = nil)
+    t = (type != nil) ? ", #{type}" : ''
+
+    print "[ FAIL ] #{@testmethod}"
+    print " \"#{param}\"#{t}" if param != nil
+    print "\n"
+
     @ok = false
+  end
+
+  def current_method
+    caller[0][/:in \`(.*?)\'\z/, 1]
+  end
+
+  def caller_method
+    caller[1][/:in \`(.*?)\'\z/, 1]
   end
 end
 
 
 def test(title)
-  puts "-- #{title} --"
   $test = Test.new
-  $test.start
+  $test.start(title)
+  sleep 0.05
   yield
   $test.finish
 end
@@ -181,6 +235,10 @@ def assert_flags(*flags)
   end
 end
 
+def assert_noanswer
+  $test.assert_noanswer
+end
+
 def assert_answer(rdata, type = nil)
   $test.assert_answer(rdata, type)
 end
@@ -193,4 +251,10 @@ end
 
 def assert_authority_type(type)
   $test.assert_authority_type(type)
+end
+
+def assert_additional(*rdata)
+  rdata.each do |rd|
+    $test.assert_additional(rd)
+  end
 end
