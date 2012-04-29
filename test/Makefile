@@ -1,7 +1,7 @@
 all: test
 
 test:
-	ruby tester.rb
+	find . -name "test.rb" -exec ruby -I. {} \;
 
 clean:
 	find . -name "*.dat" -exec rm {} \;
