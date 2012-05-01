@@ -208,8 +208,6 @@ static int
 axfr_do_axfr(axfr_config_t *conf, dns_tls_t *tls)
 {
     char maddr[256];
-    uint32_t serial_new;
-    struct sockaddr_storage ss;
 
     if (!axfr_need_refresh(conf, tls)) {
         conf->ac_expire_time = time(NULL) + conf->ac_expire;
