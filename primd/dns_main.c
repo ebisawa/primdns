@@ -359,7 +359,7 @@ static int
 main_findconf(char *basedir)
 {
     int i;
-    char *p, buf[PATH_MAX], rbuf[PATH_MAX];
+    char buf[PATH_MAX], rbuf[PATH_MAX];
 
     for (i = 0; i < NELEMS(ConfNames); i++) {
         snprintf(buf, sizeof(buf), "%s/%s", basedir, ConfNames[i]);
