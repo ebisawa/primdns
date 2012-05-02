@@ -40,13 +40,12 @@
 
 static int serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
 
-static int serverid_hostname(dns_cache_rrset_t *rrset, char *qname, dns_tls_t *tls);
-static int serverid_version(dns_cache_rrset_t *rrset, char *qname, dns_tls_t *tls);
-static int serverid_txt_record(dns_cache_rrset_t *rrset, char *qname, char *txt_string, dns_tls_t *tls);
+static int serverid_hostname(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+static int serverid_version(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
+static int serverid_txt_record(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *txt_string, dns_tls_t *tls);
 
 dns_engine_t ServerIdEngine = {
     "serverid", 0,
-    DNS_FLAG_AA,
     NULL,  /* setrg */
     NULL,  /* init */
     NULL,  /* destroy */
@@ -58,19 +57,21 @@ dns_engine_t ServerIdEngine = {
 static int
 serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
+    dns_cache_setflags(rrset, DNS_FLAG_AA);
+
     if (q->mq_type == DNS_TYPE_TXT || q->mq_type == DNS_TYPE_ALL) {
         if (q->mq_class == DNS_CLASS_CH || q->mq_class == DNS_CLASS_ANY) {
             /* RFC4892 (id.server) */
             if (strcasecmp(q->mq_name, "id.server") == 0)
-                return serverid_hostname(rrset, q->mq_name, tls);
+                return serverid_hostname(rrset, q, tls);
             if (strcasecmp(q->mq_name, "version.server") == 0)
-                return serverid_version(rrset, q->mq_name, tls);
+                return serverid_version(rrset, q, tls);
 
             /* conventional resources */
             if (strcasecmp(q->mq_name, "hostname.bind") == 0)
-                return serverid_hostname(rrset, q->mq_name, tls);
+                return serverid_hostname(rrset, q, tls);
             if (strcasecmp(q->mq_name, "version.bind") == 0)
-                return serverid_version(rrset, q->mq_name, tls);
+                return serverid_version(rrset, q, tls);
         }
     }
 
@@ -81,29 +82,29 @@ serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_questio
 }
 
 static int
-serverid_hostname(dns_cache_rrset_t *rrset, char *qname, dns_tls_t *tls)
+serverid_hostname(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
     char buf[128];
 
     if (gethostname(buf, sizeof(buf)) < 0)
         return -1;
 
-    return serverid_txt_record(rrset, qname, buf, tls);
+    return serverid_txt_record(rrset, q, buf, tls);
 }
 
 static int
-serverid_version(dns_cache_rrset_t *rrset, char *qname, dns_tls_t *tls)
+serverid_version(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
-    return serverid_txt_record(rrset, qname, PACKAGE_STRING, tls);
+    return serverid_txt_record(rrset, q, PACKAGE_STRING, tls);
 }
 
 static int
-serverid_txt_record(dns_cache_rrset_t *rrset, char *qname, char *txt_string, dns_tls_t *tls)
+serverid_txt_record(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *txt_string, dns_tls_t *tls)
 {
     int len;
     dns_msg_resource_t res;
 
-    STRLCPY(res.mr_q.mq_name, qname, sizeof(res.mr_q.mq_name));
+    STRLCPY(res.mr_q.mq_name, q->mq_name, sizeof(res.mr_q.mq_name));
     res.mr_q.mq_class = DNS_CLASS_CH;
     res.mr_q.mq_type = DNS_TYPE_TXT;
     res.mr_ttl = 0;
@@ -115,7 +116,7 @@ serverid_txt_record(dns_cache_rrset_t *rrset, char *qname, char *txt_string, dns
     res.mr_data[0] = len;
     STRLCPY((char *) &res.mr_data[1], txt_string, sizeof(res.mr_data) - 1);
 
-    if (dns_cache_add_answer(rrset, &res, tls) < 0) {
+    if (dns_cache_add_answer(rrset, q, &res, tls) < 0) {
         plog(LOG_ERR, "%s: can't add cache resource", MODULE);
         return -1;
     }

@@ -58,8 +58,8 @@ static int external_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_
 static int external_popen(char *cmd, dns_msg_question_t *q);
 static int external_wait(int s, pid_t pid);
 static int external_read_response(dns_cache_rrset_t *rrset, int fd, dns_msg_question_t *q, dns_tls_t *tls);
-static int external_read_buf(dns_cache_rrset_t *rrset, char *buf, int len, dns_tls_t *tls);
-static int external_read_line(dns_cache_rrset_t *rrset, char *line, dns_tls_t *tls);
+static int external_read_buf(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *buf, int len, dns_tls_t *tls);
+static int external_read_line(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *line, dns_tls_t *tls);
 static int external_read_rcode(char *line);
 static int external_name_parse(dns_msg_resource_t *res, char *p);
 static int external_ttl_parse(dns_msg_resource_t *res, char *p);
@@ -79,7 +79,6 @@ static int (*ResParseFunc[])(dns_msg_resource_t *, char *) = {
 
 dns_engine_t ExternalEngine = {
     "external", sizeof(external_config_t),
-    DNS_FLAG_AA,
     external_setarg,
     NULL,  /* init */
     NULL,  /* destroy */
@@ -123,6 +122,8 @@ external_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_questio
 
     plog(LOG_DEBUG, "%s: fd = %d", MODULE, fd);
     close(fd);
+
+    dns_cache_setflags(rrset, DNS_FLAG_AA);
 
     return 0;
 }
@@ -210,7 +211,7 @@ external_read_response(dns_cache_rrset_t *rrset, int fd, dns_msg_question_t *q, 
     }
 
     buf[len] = 0;
-    if (external_read_buf(rrset, buf, len, tls) < 0) {
+    if (external_read_buf(rrset, q, buf, len, tls) < 0) {
         plog(LOG_ERR, "%s: invalid external response", MODULE);
         return -1;
     }
@@ -219,26 +220,26 @@ external_read_response(dns_cache_rrset_t *rrset, int fd, dns_msg_question_t *q, 
 }
 
 static int
-external_read_buf(dns_cache_rrset_t *rrset, char *buf, int len, dns_tls_t *tls)
+external_read_buf(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *buf, int len, dns_tls_t *tls)
 {
-    char *p, *q;
+    char *p, *s;
     int count = 0, rcode = -1;
 
-    q = buf;
+    s = buf;
     for (p = buf; len > 0; p++, len--) {
         if (*p == '\n') {
             *p = 0;
             if (rcode < 0) {
-                if ((rcode = external_read_rcode(q)) == DNS_RCODE_NXDOMAIN)
+                if ((rcode = external_read_rcode(s)) == DNS_RCODE_NXDOMAIN)
                     break;
             } else {
-                if (external_read_line(rrset, q, tls) < 0)
+                if (external_read_line(rrset, q, s, tls) < 0)
                     return -1;
 
                 count++;
             }
 
-            q = p + 1;
+            s = p + 1;
         }
     }
 
@@ -251,7 +252,7 @@ external_read_buf(dns_cache_rrset_t *rrset, char *buf, int len, dns_tls_t *tls)
 }
 
 static int
-external_read_line(dns_cache_rrset_t *rrset, char *line, dns_tls_t *tls)
+external_read_line(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *line, dns_tls_t *tls)
 {
     int i;
     char *p, *last, *sep = " ";
@@ -282,7 +283,7 @@ external_read_line(dns_cache_rrset_t *rrset, char *line, dns_tls_t *tls)
         return -1;
     }
 
-    if (dns_cache_add_answer(rrset, &res, tls) < 0) {
+    if (dns_cache_add_answer(rrset, q, &res, tls) < 0) {
         plog(LOG_ERR, "%s: can't add cache resource", MODULE);
         return -1;
     }

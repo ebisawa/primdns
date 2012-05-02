@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,9 @@
 
 #define DNS_CONFIG_ZONE_NAME_MAX   128
 
+#define DNS_CONFIG_ZONE_LIST_HEAD(list)        ((dns_config_zone_t *) dns_list_head((list)))
+#define DNS_CONFIG_ZONE_LIST_NEXT(list, elem)  ((dns_config_zone_t *) dns_list_next((list), (dns_list_elem_t *) (elem)))
+
 typedef struct {
     dns_list_elem_t            ze_elem;
     void                      *ze_engine;
@@ -64,7 +67,7 @@ typedef struct {
 int dns_config_update(char *name);
 void dns_config_shutdown(void);
 void dns_config_notify_all_engines(void);
-dns_config_zone_t *dns_config_find_zone(char *name, int class);
+dns_config_zone_t *dns_config_find_zone(int *exact, char *name, int klass);
 
 extern dns_config_root_t *ConfigRoot;
 

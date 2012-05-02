@@ -57,7 +57,6 @@ typedef int (dns_engine_dumpnext_t)(dns_engine_param_t *param, dns_msg_resource_
 typedef struct {
     char                       *eng_name;
     int                         eng_conflen;
-    int                         eng_flags;
     dns_engine_setarg_t        *eng_setarg;
     dns_engine_init_t          *eng_init;
     dns_engine_destroy_t       *eng_destroy;

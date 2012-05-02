@@ -1,26 +1,26 @@
 $ORIGIN	example.com.
 $TTL	1800
 
-@	IN	SOA	ns1.example.com. hostmaster.example.com. (
-				2012042914	; Serial
-				1H		; Refresh
-				5M		; Retry
-				1W		; Expire
-				1H		; Minimum
-			)
+@		IN	SOA	ns1.example.com. hostmaster.example.com. (
+					2012050200	; Serial
+					1H		; Refresh
+					5M		; Retry
+					1W		; Expire
+					1H		; Minimum
+				)
 
-	IN	NS	ns1.example.com.
-	IN	NS	ns2.example.com.
+		IN	NS	ns1.example.com.
+		IN	NS	ns2.example.com.
 
-ns1	IN	A	192.0.2.1
-ns2	IN	A	192.0.2.2
-ns2	IN	AAAA	2001:db8::2:2
+ns1		IN	A	192.0.2.1
+ns2		IN	A	192.0.2.2
+ns2		IN	AAAA	2001:db8::2:2
 
-sub	IN	NS	ns.example.jp.
-ns.example.jp IN A	192.0.2.100 
+sub		IN	NS	ns.example.jp.
+ns.example.jp.	IN	A	192.0.2.100
 
-a	IN	A	192.0.2.10
-b	IN	CNAME	a
-c	IN	CNAME	nonexistent
-d	IN	CNAME	nonexistent.example.org.
-e	IN	CNAME	x.sub
+a	      	IN	A	192.0.2.10
+b		IN	CNAME	a
+c		IN	CNAME	nonexistent
+d		IN	CNAME	nonexistent.example.org.
+e		IN	CNAME	x.sub

@@ -2,7 +2,7 @@ $ORIGIN	example.com.
 $TTL	1800
 
 @	IN	SOA	ns1.example.com. hostmaster.example.com. (
-				2012042906	; Serial
+				2012042912	; Serial
 				1H		; Refresh
 				5M		; Retry
 				1W		; Expire

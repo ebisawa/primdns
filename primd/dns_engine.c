@@ -141,10 +141,7 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
                 return NULL;
             }
 
-            /* XXX eng_flags will be removed */
-            dns_cache_setflags(rrset, engine->eng_flags);
             rcode = dns_cache_getrcode(rrset);
-
             plog(LOG_DEBUG, "%s: rcode %d (%s)", MODULE, rcode, dns_proto_rcode_string(rcode));
 
             if (rcode == DNS_RCODE_NOERROR)
@@ -152,6 +149,7 @@ dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls)
             if (rcode != DNS_RCODE_NOERROR && rcode != DNS_RCODE_NXDOMAIN)
                 return rrset;
 
+            // XXX merge answers?
             if (dns_cache_count_answer(rrset) > 0)
                 return rrset;
         }

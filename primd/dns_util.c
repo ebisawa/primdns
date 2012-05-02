@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,6 +76,20 @@ dns_util_strlower(char *str)
 {
     for (; *str != 0; str++)
         *str = tolower(*str);
+}
+
+int
+dns_util_strscmp(char *longstr, char *substr)
+{
+    int llen, slen;
+
+    llen = strlen(longstr);
+    slen = strlen(substr);
+
+    if (llen < slen)
+        return -1;
+
+    return strcmp(&longstr[llen - slen], substr);
 }
 
 void

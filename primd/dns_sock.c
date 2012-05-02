@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -129,8 +129,11 @@ dns_sock_start_thread(void)
 {
     int i;
 
-    for (i = 0; i < DNS_SOCK_THREADS; i++)
-        pthread_create(&SockThreads[i], NULL, (void *(*)(void *)) sock_thread_routine, (void *) (i + 1));
+    for (i = 0; i < DNS_SOCK_THREADS; i++) {
+        pthread_create(&SockThreads[i], NULL,
+                       (void *(*)(void *)) sock_thread_routine,
+                       (void *)(uintptr_t) (i + 1));
+    }
 
     return 0;
 }
@@ -261,7 +264,7 @@ dns_sock_timer_cancel(int timer_id)
 static void *
 sock_thread_routine(void *param)
 {
-    int thread_id = (int) param;
+    int thread_id = (int)(intptr_t) param;
 
     dns_util_sigmaskall();
 

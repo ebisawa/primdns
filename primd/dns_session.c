@@ -52,7 +52,9 @@
 #define MODULE "session"
 
 #define NONBLOCK  1
+
 #define SESSION_EDNS_REQUESTED   0x0001
+#define SESSION_NO_NCACHE        0x0002
 
 #define IS_VALID_QUESTION(q)     ((q)->mq_class != 0 && (q)->mq_type != 0)
 
@@ -92,18 +94,19 @@ static int session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, d
 static int session_check_question_header(dns_header_t *header);
 static dns_cache_rrset_t *session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf);
 static dns_cache_rrset_t *session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset);
-static dns_cache_rrset_t *session_query_referral(dns_session_t *session, dns_cache_rrset_t *rrset_an);
-static dns_cache_rrset_t *session_query_recursive(dns_session_t *session, dns_msg_question_t *q, int nlevel);
-static dns_cache_rrset_t *session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type);
+static dns_cache_rrset_t *session_query_referral(dns_session_t *session);
+static dns_cache_rrset_t *session_query_recursive(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q, int nlevel);
 static dns_cache_rrset_t *session_query_internal(dns_session_t *session, dns_msg_question_t *q);
+static dns_cache_rrset_t *session_query_glue(dns_session_t *session, dns_msg_question_t *q);
+static dns_cache_rrset_t *session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type);
 static int session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type);
-static void session_resolve_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel);
+static void session_query_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel);
 static void session_send_response(dns_sock_buf_t *sbuf);
 static void session_send_finish(dns_sock_buf_t *sbuf);
 static int session_send_immediate(dns_sock_buf_t *sbuf);
 static int session_send_axfr(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *soa);
 static int session_send_axfr_resource(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
-static int session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset_an, dns_cache_rrset_t *rrset_ns, int rcode, int flags);
+static int session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset_an, dns_cache_rrset_t *rrset_ns);
 static int session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg_resource_t *res);
 static int session_make_notify_response(dns_sock_buf_t *sbuf, dns_session_t *session);
 static int session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode, int flags);
@@ -116,6 +119,7 @@ static void session_write_resources_opt(dns_session_t *session, dns_msg_handle_t
 static void session_shuffle_resources(dns_session_t *session, dns_msg_resource_t **res, int num);
 static int session_max_payload_size(dns_session_t *session, int defmax);
 static int session_compare_question(dns_msg_question_t *a, dns_msg_question_t *b);
+static int session_validate_glue(dns_cache_rrset_t *rrset, char *zone_name);
 
 int
 dns_session_init(void)
@@ -308,13 +312,14 @@ session_init(dns_session_t *session, uint16_t msgid, uint16_t flags)
 {
     session->sess_msgid = msgid;
     session->sess_flags = flags;
-
     session->sess_edns_version = 0;
     session->sess_edns_bufsize = 0;
     session->sess_extflags = 0;
     session->sess_opcode = 0;
 
     memset(&session->sess_question, 0, sizeof(session->sess_question));
+    memset(&session->sess_qlast, 0, sizeof(session->sess_qlast));
+
     session->sess_config = ConfigRoot;
 }
 
@@ -368,7 +373,8 @@ session_request_proc(dns_session_t *session, dns_sock_buf_t *sbuf)
         goto error;
 
     q = &session->sess_question;
-    if ((session->sess_zone = dns_config_find_zone(q->mq_name, q->mq_class)) == NULL) {
+    if ((session->sess_zone = dns_config_find_zone(&session->sess_zone_exact,
+                                                   q->mq_name, q->mq_class)) == NULL) {
         rcode = DNS_RCODE_SERVFAIL;
         goto error;
     }
@@ -427,31 +433,16 @@ session_request_query(dns_session_t *session, dns_sock_buf_t *sbuf)
 static int
 session_request_query_normal(dns_session_t *session, dns_sock_buf_t *sbuf)
 {
-    int rcode, flags;
-    dns_cache_rrset_t *rrset_an = NULL, *rrset_ns = NULL;
+    dns_cache_rrset_t *rrset_an = NULL;
+    dns_cache_rrset_t *rrset_ns = NULL;
 
     ATOMIC_INC(&SessionStats.stat_query);
 
-    /* XXX */
-    if ((rrset_ns = session_query_referral(session, NULL)) == NULL) {
-        if ((rrset_an = session_query_answer(session, sbuf)) == NULL)
-            goto error;
+    if ((rrset_an = session_query_answer(session, sbuf)) == NULL)
+        goto error;
 
-        rcode = dns_cache_getrcode(rrset_an);
-        flags = dns_cache_getflags(rrset_an);
-    }
-
-    if (rrset_ns == NULL) {
-        if ((rrset_ns = session_query_referral(session, rrset_an)) == NULL)
-            rrset_ns = session_query_authority(session, rrset_an);
-        else {
-            /* if referral is set -> NOERROR, no AA */
-            rcode = DNS_RCODE_NOERROR;
-            flags &= ~DNS_FLAG_AA;
-        }
-    }
-
-    if (session_make_response(sbuf, session, rrset_an, rrset_ns, rcode, flags) < 0)
+    rrset_ns = session_query_authority(session, rrset_an);
+    if (session_make_response(sbuf, session, rrset_an, rrset_ns) < 0)
         goto error;
 
     if (rrset_ns != NULL)
@@ -485,7 +476,8 @@ session_request_query_axfr(dns_session_t *session, dns_sock_buf_t *sbuf)
 
     ATOMIC_INC(&SessionStats.stat_axfr_request);
 
-    q = &session->sess_question;  zone = session->sess_zone;
+    q = &session->sess_question;
+    zone = session->sess_zone;
     dns_util_sa2str_wop(from, sizeof(from), (SA *) &sbuf->sb_remote);
 
     if (!dns_acl_match(&zone->z_slaves.zss_acl, (SA *) &sbuf->sb_remote)) {
@@ -570,6 +562,7 @@ session_read_question(dns_session_t *session, dns_sock_buf_t *sbuf)
 
         plog_query(LOG_INFO, &question, (SA *) &sbuf->sb_remote, sbuf->sb_sock->sock_prop->sp_char);
         memcpy(&session->sess_question, &question, sizeof(question));
+        memcpy(&session->sess_qlast, &question, sizeof(question));
     }
 
     if (arcount == 1 && session_read_edns_opt(session, sbuf, &handle) < 0)
@@ -623,8 +616,15 @@ session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf)
 
     q = &session->sess_question;
     if ((rrset = dns_cache_lookup(q, 0, &session->sess_tls)) == NULL) {
-        if ((rrset = session_query_recursive(session, q, 0)) == NULL)
+        if ((rrset = session_query_recursive(session, session->sess_zone, q, 0)) == NULL)
             return NULL;
+
+        /* NS as referral is a nonauthoritative resource */
+        q = &session->sess_qlast;
+        if (q->mq_type == DNS_TYPE_NS) {
+            if (!session->sess_zone_exact)
+                dns_cache_delete_answers(rrset, &session->sess_tls);
+        }
 
         dns_cache_register(rrset, 0, &session->sess_tls);
     }
@@ -633,21 +633,31 @@ session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf)
 }
 
 static dns_cache_rrset_t *
-session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset)
+session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset_an)
 {
-    int rcode;
     dns_msg_question_t *q;
     dns_cache_rrset_t *rrset_ns = NULL;
 
-    if (dns_cache_getflags(rrset) & DNS_FLAG_AA) {
+    if (dns_list_count(&rrset_an->rrset_list_answer) == 0) {
+        if ((rrset_ns = session_query_referral(session)) != NULL) {
+            dns_cache_setrcode(rrset_an, DNS_RCODE_NOERROR);
+
+            if (dns_list_count(&rrset_an->rrset_list_cname) == 0)
+                dns_cache_clearflags(rrset_an, DNS_FLAG_AA);
+
+            return rrset_ns;
+        }
+
+        plog(LOG_DEBUG, "%s: referral is not found", __func__);
+    }
+
+    if (dns_cache_getflags(rrset_an) & DNS_FLAG_AA) {
         plog(LOG_DEBUG, "%s: authoritative answer", MODULE);
 
-        rcode = dns_cache_getrcode(rrset);
         q = &session->sess_question;
-
-        if (dns_list_count(&rrset->rrset_list_answer) == 0) {
-            /* no resources found */
-            rrset_ns = session_query_zone(session, q, DNS_TYPE_SOA);
+        if (dns_list_count(&rrset_an->rrset_list_answer) == 0) {
+            if ((session->sess_extflags & SESSION_NO_NCACHE) == 0)
+                rrset_ns = session_query_zone(session, q, DNS_TYPE_SOA);
         } else {
             if (q->mq_type != DNS_TYPE_NS)
                 rrset_ns = session_query_zone(session, q, DNS_TYPE_NS);
@@ -658,38 +668,34 @@ session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset)
 }
 
 static dns_cache_rrset_t *
-session_query_referral(dns_session_t *session, dns_cache_rrset_t *rrset_an)
+session_query_referral(dns_session_t *session)
 {
     char *p;
     int zlen;
     dns_msg_question_t *q, q_ns;
     dns_cache_rrset_t *rrset;
 
-    if (rrset_an == NULL)
-        q = &session->sess_question;
-    else {
-        if (dns_list_count(&rrset_an->rrset_list_answer) > 0)
-            return NULL;
-
-        q = dns_cache_lastq(rrset_an);
-    }
-
-    zlen = strlen(session->sess_zone->z_name);
-    p = q->mq_name;
-
+    q = &session->sess_qlast;
     q_ns.mq_type = DNS_TYPE_NS;
     q_ns.mq_class = q->mq_class;
+
+    p = q->mq_name;
+    zlen = strlen(session->sess_zone->z_name);
 
     do {
         if (strlen(p) <= zlen)
             break;
 
         STRLCPY(q_ns.mq_name, p, sizeof(q_ns.mq_name));
+
+        plog(LOG_DEBUG, "%s: query referral: %s %s %s",
+             MODULE, q_ns.mq_name,
+             dns_proto_class_string(q_ns.mq_class),
+             dns_proto_type_string(q_ns.mq_type));
+
         if ((rrset = session_query_internal(session, &q_ns)) != NULL) {
-            if (dns_list_count(&rrset->rrset_list_answer) > 0) {
-                plog(LOG_DEBUG, "%s: found referral: %s", MODULE, p);
+            if (dns_list_count(&rrset->rrset_list_answer) > 0)
                 return rrset;
-            }
 
             dns_cache_release(rrset, &session->sess_tls);
         }
@@ -699,30 +705,16 @@ session_query_referral(dns_session_t *session, dns_cache_rrset_t *rrset_an)
 }
 
 static dns_cache_rrset_t *
-session_query_recursive(dns_session_t *session, dns_msg_question_t *q, int nlevel)
+session_query_recursive(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q, int nlevel)
 {
     dns_cache_rrset_t *rrset;
 
-    if ((rrset = dns_engine_query(q, session->sess_zone, &session->sess_tls)) != NULL) {
-        if (dns_list_count(&rrset->rrset_list_cname) > 0 &&
-            dns_list_count(&rrset->rrset_list_answer) == 0) {
-            session_resolve_cname(session, q, rrset, nlevel + 1);
-        }
+    if ((rrset = dns_engine_query(q, zone, &session->sess_tls)) != NULL) {
+        if (dns_list_count(&rrset->rrset_list_cname) > 0)
+            session_query_cname(session, q, rrset, nlevel + 1);
     }
 
     return rrset;
-}
-
-static dns_cache_rrset_t *
-session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type)
-{
-    dns_msg_question_t q_z;
-
-    STRLCPY(q_z.mq_name, session->sess_zone->z_name, sizeof(q_z.mq_name));
-    q_z.mq_type = type;
-    q_z.mq_class = q->mq_class;
-
-    return session_query_internal(session, &q_z);
 }
 
 static dns_cache_rrset_t *
@@ -742,6 +734,41 @@ session_query_internal(dns_session_t *session, dns_msg_question_t *q)
 
     return rrset;
 }
+
+static dns_cache_rrset_t *
+session_query_glue(dns_session_t *session, dns_msg_question_t *q)
+{
+    dns_cache_rrset_t *rrset;
+
+    plog(LOG_DEBUG, "%s: query glue: %s %s %s", MODULE,
+         q->mq_name, dns_proto_class_string(q->mq_class), dns_proto_type_string(q->mq_type));
+
+    if ((rrset = dns_cache_lookup(q, DNS_CACHE_GLUE, &session->sess_tls)) == NULL) {
+        /* XXX cache per zone? */
+        if ((rrset = dns_engine_query(q, session->sess_zone, &session->sess_tls)) == NULL)
+            return NULL;
+
+        dns_cache_register(rrset, DNS_CACHE_GLUE, &session->sess_tls);
+    }
+
+    if (session_validate_glue(rrset, session->sess_zone->z_name) < 0)
+        return NULL;
+
+    return rrset;
+}
+
+static dns_cache_rrset_t *
+session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type)
+{
+    dns_msg_question_t q_z;
+
+    STRLCPY(q_z.mq_name, session->sess_zone->z_name, sizeof(q_z.mq_name));
+    q_z.mq_type = type;
+    q_z.mq_class = q->mq_class;
+
+    return session_query_internal(session, &q_z);
+}
+
 
 static int
 session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type)
@@ -764,10 +791,11 @@ session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns
 }
 
 static void
-session_resolve_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel)
+session_query_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel)
 {
     dns_cache_t *cache;
     dns_cache_rrset_t *rr_cname;
+    dns_config_zone_t *zone;
     dns_msg_question_t q_cname;
 
     if (nlevel > DNS_CNAME_NEST_MAX) {
@@ -776,18 +804,25 @@ session_resolve_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_r
     }
 
     /* we don't support multiple-cnames */
-    cache = DNS_CACHE_LIST_HEAD(&rrset->rrset_list_cname);
-    if (cache != NULL) {
-        memcpy(&q_cname, q, sizeof(q_cname));
-        dns_msg_parse_name(q_cname.mq_name, &cache->cache_res);
+    if ((cache = DNS_CACHE_LIST_HEAD(&rrset->rrset_list_cname)) == NULL)
+        return;
 
-        plog(LOG_DEBUG, "%s: restart query for CNAME: %s", MODULE, q_cname.mq_name);
+    memcpy(&q_cname, q, sizeof(q_cname));
+    dns_msg_parse_name(q_cname.mq_name, &cache->cache_res);
+    memcpy(&session->sess_qlast, &q_cname, sizeof(q_cname));
 
-        if ((rr_cname = session_query_recursive(session, &q_cname, nlevel)) != NULL) {
-            plog(LOG_DEBUG, "%s: %d answers for CNAME", MODULE, dns_list_count(&rr_cname->rrset_list_answer));
-            dns_cache_merge(rrset, rr_cname, &session->sess_tls);
-            dns_cache_release(rr_cname, &session->sess_tls);
-        }
+    plog(LOG_DEBUG, "%s: restart query for CNAME: %s", MODULE, q_cname.mq_name);
+
+    if ((zone = dns_config_find_zone(&session->sess_zone_exact,
+                                     q_cname.mq_name, q_cname.mq_class)) == NULL) {
+        session->sess_extflags |= SESSION_NO_NCACHE;
+        return;
+    }
+
+    if ((rr_cname = session_query_recursive(session, zone, &q_cname, nlevel)) != NULL) {
+        plog(LOG_DEBUG, "%s: %d answers for CNAME", MODULE, dns_list_count(&rr_cname->rrset_list_answer));
+        dns_cache_merge(rrset, q, rr_cname, &session->sess_tls);
+        dns_cache_release(rr_cname, &session->sess_tls);
     }
 }
 
@@ -860,15 +895,19 @@ session_send_axfr_resource(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg
 }
 
 static int
-session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset_an, dns_cache_rrset_t *rrset_ns, int rcode, int flags)
+session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rrset_t *rrset_an, dns_cache_rrset_t *rrset_ns)
+
 {
-    int resmax;
+    int resmax, rcode, flags;
     dns_msg_handle_t handle;
 
     plog(LOG_DEBUG, "%s: send response", MODULE);
 
     resmax = SOCK_MSGMAX(sbuf->sb_sock);
     resmax = session_max_payload_size(session, resmax);
+
+    rcode = dns_cache_getrcode(rrset_an);
+    flags = dns_cache_getflags(rrset_an);
 
     if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_open() failed", MODULE);
@@ -879,10 +918,8 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
         return -1;
 
     /* answer */
-    if (rrset_an != NULL) {
-        session_write_resources(session, &handle, &rrset_an->rrset_list_cname, DNS_MSG_RESTYPE_ANSWER);
-        session_write_resources_rr(session, &handle, &rrset_an->rrset_list_answer, DNS_MSG_RESTYPE_ANSWER);
-    }
+    session_write_resources(session, &handle, &rrset_an->rrset_list_cname, DNS_MSG_RESTYPE_ANSWER);
+    session_write_resources_rr(session, &handle, &rrset_an->rrset_list_answer, DNS_MSG_RESTYPE_ANSWER);
 
     /* authority & additional */
     if (rrset_ns != NULL) {
@@ -1049,8 +1086,7 @@ session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns
 static void
 session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int type)
 {
-    dns_cache_t *cache, *ca_a;
-    dns_cache_rrset_t *rrset;
+    dns_cache_t *cache;
     dns_msg_question_t *q, q_a;
 
     q = &session->sess_question;
@@ -1078,7 +1114,7 @@ session_write_resources_ar_q(dns_session_t *session, dns_msg_handle_t *handle, d
     dns_cache_t *ca_a;
     dns_cache_rrset_t *rrset;
 
-    if ((rrset = session_query_internal(session, q)) != NULL) {
+    if ((rrset = session_query_glue(session, q)) != NULL) {
         if (dns_list_count(&rrset->rrset_list_cname) == 0) {
             ca_a = DNS_CACHE_LIST_HEAD(&rrset->rrset_list_answer);
             while (ca_a != NULL) {
@@ -1149,17 +1185,31 @@ session_max_payload_size(dns_session_t *session, int defmax)
 static int
 session_compare_question(dns_msg_question_t *a, dns_msg_question_t *b)
 {
-    int r;
-
     if (a->mq_type != DNS_TYPE_ALL && b->mq_type != DNS_TYPE_ALL) {
-        if ((r = a->mq_type - b->mq_type) != 0)
-            return r;
+        if (a->mq_type != b->mq_type)
+            return -1;
     }
 
     if (a->mq_class != DNS_CLASS_ANY && b->mq_type != DNS_CLASS_ANY) {
-        if ((r = a->mq_class - b->mq_class) != 0)
-            return r;
+        if (a->mq_class != b->mq_class)
+            return -1;
     }
 
     return strcasecmp(a->mq_name, b->mq_name);
+}
+
+static int
+session_validate_glue(dns_cache_rrset_t *rrset, char *zone_name)
+{
+    dns_cache_t *cache;
+
+    cache = DNS_CACHE_LIST_HEAD(&rrset->rrset_list_answer);
+    while (cache != NULL) {
+        if (dns_util_strscmp(cache->cache_res.mr_q.mq_name, zone_name) != 0)
+            return -1;
+
+        cache = DNS_CACHE_LIST_NEXT(&rrset->rrset_list_answer, cache);
+    }
+
+    return 0;
 }

@@ -83,7 +83,7 @@ static void config_free_zone_slaves(dns_config_zone_slaves_t *zss);
 static void config_free_zone_engine(dns_config_zone_engine_t *ze);
 static int config_parse_root(dns_config_root_t *root, config_context_t *ctx);
 static int config_parse_zone_head(dns_config_zone_t *zone, config_context_t *ctx);
-static int config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_token_t *tok);
+static int config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_token_t *tok, void *param);
 static int config_parse_zone_search_body(dns_config_zone_search_t *search, config_context_t *ctx, config_token_t *tok, dns_config_zone_t *zone);
 static int config_parse_zone_slaves_body(dns_config_zone_slaves_t *slaves, config_context_t *ctx, config_token_t *tok, dns_config_zone_t *zone);
 static int config_parse_zone_search_engine_param(dns_config_zone_search_t *search, config_context_t *ctx, dns_engine_t *engine, dns_config_zone_t *zone, void *econf);
@@ -156,35 +156,47 @@ dns_config_notify_all_engines(void)
 }
 
 dns_config_zone_t *
-dns_config_find_zone(char *name, int class)
+dns_config_find_zone(int *exact, char *name, int klass)
 {
-    int len, buflen, match_len = -1;
+    int znlen, buflen, match_len = -1;
     char buf[DNS_NAME_MAX];
     dns_config_root_t *root;
     dns_config_zone_t *zone, *candidate = NULL;
 
     if ((root = ConfigRoot) == NULL)
         return NULL;
+    if (exact != NULL)
+        *exact = 0;
 
     STRLCPY(buf, name, sizeof(buf));
     STRLOWER(buf);
     buflen = strlen(buf);
 
-    zone = (dns_config_zone_t *) dns_list_head(&root->r_zone);
+    zone = DNS_CONFIG_ZONE_LIST_HEAD(&root->r_zone);
     while (zone != NULL) {
-        if (zone->z_class == class || class == DNS_CLASS_ANY) {
-            len = strlen(zone->z_name);
-            if (buflen >= len && len > match_len) {
-                if (buflen == len || buf[buflen - len - 1] == '.' || len == 0) {
-                    if (strcmp(&buf[buflen - len], zone->z_name) == 0) {
-                        candidate = zone;
-                        match_len = len;
-                    }
+        if (zone->z_class != klass && klass != DNS_CLASS_ANY)
+            goto next;
+
+        znlen = strlen(zone->z_name);
+        if (znlen > buflen || znlen <= match_len)
+            goto next;
+        if (znlen == buflen || znlen == 0 || buf[buflen - znlen - 1] == '.') {
+            if (strcmp(&buf[buflen - znlen], zone->z_name) == 0) {
+                if (znlen == buflen) {
+                    if (exact != NULL)
+                        *exact = 1;
+
+                    plog(LOG_DEBUG, "%s: found zone \"%s\" (exact match)", MODULE, zone->z_name);
+                    return zone;
+                } else {
+                    candidate = zone;
+                    match_len = znlen;
                 }
             }
         }
 
-        zone = (dns_config_zone_t *) dns_list_next(&root->r_zone, &zone->z_elem);
+    next:
+        zone = DNS_CONFIG_ZONE_LIST_NEXT(&root->r_zone, zone);
     }
 
     if (candidate == NULL)
@@ -365,14 +377,20 @@ config_parse_zone_head(dns_config_zone_t *zone, config_context_t *ctx)
 }
 
 static int
-config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_token_t *tok)
+config_parse_zone_body(dns_config_zone_t *zone, config_context_t *ctx, config_token_t *tok, void *param)
 {
-    if (strcmp(tok->tok_string, "search") == 0)
-        return config_parse_clause(&zone->z_search, ctx, NULL, (config_parse_body_t *) config_parse_zone_search_body, zone);
-    if (strcmp(tok->tok_string, "slaves") == 0)
-        return config_parse_clause(&zone->z_slaves, ctx, NULL, (config_parse_body_t *) config_parse_zone_slaves_body, zone);
+    if (strcmp(tok->tok_string, "search") == 0) {
+        return config_parse_clause(&zone->z_search, ctx, NULL,
+                                   (config_parse_body_t *) config_parse_zone_search_body, zone);
+    }
+
+    if (strcmp(tok->tok_string, "slaves") == 0) {
+        return config_parse_clause(&zone->z_slaves, ctx, NULL,
+                                   (config_parse_body_t *) config_parse_zone_slaves_body, zone);
+    }
 
     config_error_unexpected(tok, ctx);
+
     return -1;
 }
 

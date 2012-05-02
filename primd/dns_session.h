@@ -46,12 +46,14 @@ typedef struct {
     u_int16_t                 sess_edns_version;
     u_int16_t                 sess_edns_bufsize;
     u_int32_t                 sess_extflags;
-    int                       sess_opcode;
     dns_msg_question_t        sess_question;
+    dns_msg_question_t        sess_qlast;
+    int                       sess_opcode;
     void                     *sess_config;
 
     /* may not be initialized by session_init() */
     dns_config_zone_t        *sess_zone;
+    int                       sess_zone_exact;
 
     /* must not be destroyed by session_init() */
     pthread_t                 sess_thread;

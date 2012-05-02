@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -81,6 +81,7 @@ static int cache_rrset_retain(dns_cache_rrset_t *rrset);
 static void cache_rrset_release(dns_cache_rrset_t *rrset, dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_retain2(dns_cache_rrset_t **rr0, int nospin);
 static int cache_rrset_plock(dns_cache_rrset_t **ptr, int nospin);
+static void cache_rrset_delete_answers(dns_cache_rrset_t *rrset, dns_tls_t *tls);
 static void cache_rrset_free(dns_cache_rrset_t *rrset, dns_tls_t *tls);
 static void cache_rrset_reset(dns_cache_rrset_t *rrset, dns_tls_t *tls);
 static int cache_rrset_register(cache_hash_t *hash, dns_cache_rrset_t *rrset, unsigned hvalue, dns_tls_t *tls);
@@ -168,7 +169,7 @@ dns_cache_release(dns_cache_rrset_t *rrset, dns_tls_t *tls)
 }
 
 int
-dns_cache_add_answer(dns_cache_rrset_t *rrset, dns_msg_resource_t *res, dns_tls_t *tls)
+dns_cache_add_answer(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_msg_resource_t *res, dns_tls_t *tls)
 {
     dns_cache_t *cache;
 
@@ -178,7 +179,7 @@ dns_cache_add_answer(dns_cache_rrset_t *rrset, dns_msg_resource_t *res, dns_tls_
     cache_init(cache, res);
     cache_rrset_set_expire(rrset, cache);
 
-    if (cache->cache_res.mr_q.mq_type == DNS_TYPE_CNAME)
+    if (cache->cache_res.mr_q.mq_type == DNS_TYPE_CNAME && q->mq_type != DNS_TYPE_CNAME)
         dns_list_push(&rrset->rrset_list_cname, &cache->cache_elem);
     else
         dns_list_push(&rrset->rrset_list_answer, &cache->cache_elem);
@@ -197,13 +198,10 @@ dns_cache_count_answer(dns_cache_rrset_t *rrset)
     return count;
 }
 
-dns_msg_question_t *
-dns_cache_lastq(dns_cache_rrset_t *rrset)
+void
+dns_cache_delete_answers(dns_cache_rrset_t *rrset, dns_tls_t *tls)
 {
-    if (rrset->rrset_qcname.mq_name[0] != 0)
-        return &rrset->rrset_qcname;
-    else
-        return &rrset->rrset_question;
+    cache_rrset_delete_answers(rrset, tls);
 }
 
 void
@@ -221,25 +219,23 @@ dns_cache_negative(dns_cache_rrset_t *rrset, uint32_t ttl)
 }
 
 void
-dns_cache_merge(dns_cache_rrset_t *rrset, dns_cache_rrset_t *rr_m, dns_tls_t *tls)
+dns_cache_merge(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_cache_rrset_t *rr_m, dns_tls_t *tls)
 {
     dns_cache_t *cache;
 
     cache = DNS_CACHE_LIST_HEAD(&rr_m->rrset_list_cname);
     while (cache != NULL) {
-        dns_cache_add_answer(rrset, &cache->cache_res, tls);
+        dns_cache_add_answer(rrset, q, &cache->cache_res, tls);
         cache = DNS_CACHE_LIST_NEXT(&rr_m->rrset_list_cname, cache);
     }
 
     cache = DNS_CACHE_LIST_HEAD(&rr_m->rrset_list_answer);
     while (cache != NULL) {
-        dns_cache_add_answer(rrset, &cache->cache_res, tls);
+        dns_cache_add_answer(rrset, q, &cache->cache_res, tls);
         cache = DNS_CACHE_LIST_NEXT(&rr_m->rrset_list_answer, cache);
     }
 
-    memcpy(&rrset->rrset_qcname, &rr_m->rrset_question, sizeof(rrset->rrset_qcname));
     rrset->rrset_dns_rcode = rr_m->rrset_dns_rcode;
-    rrset->rrset_dns_flags = rr_m->rrset_dns_flags;
 }
 
 void
@@ -276,6 +272,12 @@ void
 dns_cache_setflags(dns_cache_rrset_t *rrset, unsigned flags)
 {
     rrset->rrset_dns_flags |= flags;
+}
+
+void
+dns_cache_clearflags(dns_cache_rrset_t *rrset, unsigned flags)
+{
+    rrset->rrset_dns_flags &= ~flags;
 }
 
 unsigned
@@ -347,7 +349,6 @@ cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls)
 
     memcpy(&rrset->rrset_question, q, sizeof(*q));
     STRLOWER(rrset->rrset_question.mq_name);
-    rrset->rrset_qcname.mq_name[0] = 0;
 
     dns_list_init(&rrset->rrset_list_cname);
     dns_list_init(&rrset->rrset_list_answer);
@@ -521,6 +522,15 @@ retry:
         goto retry;
 
     return 0;
+}
+
+static void
+cache_rrset_delete_answers(dns_cache_rrset_t *rrset, dns_tls_t *tls)
+{
+    dns_cache_t *cache;
+
+    while ((cache = (dns_cache_t *) dns_list_pop(&rrset->rrset_list_answer)) != NULL)
+        dns_mpool_release(&CachePool, cache, tls->tls_id);
 }
 
 static void

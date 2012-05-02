@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,6 +53,7 @@
 void dns_util_strlcpy(char *dst, char *src, int max);
 void dns_util_strlcat(char *dst, char *src, int max);
 void dns_util_strlower(char *str);
+int dns_util_strscmp(char *longstr, char *substr);
 void dns_util_sigmaskall(void);
 void dns_util_sainit(struct sockaddr *sa, int af);
 void dns_util_sacopy(struct sockaddr *dst, struct sockaddr *src);

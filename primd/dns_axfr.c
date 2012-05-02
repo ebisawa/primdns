@@ -88,7 +88,6 @@ static char *PrimAxfr = "primdns-axfr";
 
 dns_engine_t AxfrEngine = {
     "axfr", sizeof(axfr_config_t),
-    DNS_FLAG_AA,
     axfr_setarg,
     axfr_init,
     axfr_destroy,

@@ -56,15 +56,14 @@ static int forward_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_m
 static int forward_connect(struct sockaddr *to, dns_tls_t *tls);
 static int forward_socket(struct sockaddr *to, dns_tls_t *tls);
 static int forward_send(int s, dns_msg_question_t *q, uint16_t msgid);
-static int forward_udp_receive(dns_cache_rrset_t *rrset, int s, uint16_t msgid, dns_tls_t *tls);
-static int forward_msg_parse(dns_cache_rrset_t *rrset, char *buf, int len, uint16_t msgid, dns_tls_t *tls);
-static int forward_msg_parse_resource(dns_cache_rrset_t *rrset, dns_msg_handle_t *handle, int count, dns_tls_t *tls);
+static int forward_udp_receive(dns_cache_rrset_t *rrset, dns_msg_question_t *q, int s, uint16_t msgid, dns_tls_t *tls);
+static int forward_msg_parse(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *buf, int len, uint16_t msgid, dns_tls_t *tls);
+static int forward_msg_parse_resource(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_msg_handle_t *handle, int count, dns_tls_t *tls);
 static int forward_msg_parse_resource_soa(dns_cache_rrset_t *rrset, dns_msg_handle_t *handle, int count);
 static int forward_validate_header(dns_header_t *header, uint16_t expid);
 
 dns_engine_t ForwardEngine = {
     "forward", sizeof(forward_config_t),
-    0,
     forward_setarg,
     NULL,  /* init */
     NULL,  /* destroy */
@@ -112,7 +111,7 @@ forward_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question
         return -1;
     }
 
-    if (forward_udp_receive(rrset, s, msgid, tls) < 0) {
+    if (forward_udp_receive(rrset, q, s, msgid, tls) < 0) {
         plog(LOG_ERR, "%s: receiving response failed: %s", MODULE, q->mq_name);
         close(s);
         return -1;
@@ -193,7 +192,7 @@ forward_send(int s, dns_msg_question_t *q, uint16_t msgid)
 }
 
 static int
-forward_udp_receive(dns_cache_rrset_t *rrset, int s, uint16_t msgid, dns_tls_t *tls)
+forward_udp_receive(dns_cache_rrset_t *rrset, dns_msg_question_t *q, int s, uint16_t msgid, dns_tls_t *tls)
 {
     int len;
     char buf[DNS_UDP_MSG_MAX];
@@ -207,11 +206,11 @@ forward_udp_receive(dns_cache_rrset_t *rrset, int s, uint16_t msgid, dns_tls_t *
         return -1;
     }
 
-    return forward_msg_parse(rrset, buf, len, msgid, tls);
+    return forward_msg_parse(rrset, q, buf, len, msgid, tls);
 }
 
 static int
-forward_msg_parse(dns_cache_rrset_t *rrset, char *buf, int len, uint16_t msgid, dns_tls_t *tls)
+forward_msg_parse(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *buf, int len, uint16_t msgid, dns_tls_t *tls)
 {
     int count, rcode;
     uint16_t flags;
@@ -261,7 +260,7 @@ forward_msg_parse(dns_cache_rrset_t *rrset, char *buf, int len, uint16_t msgid, 
      * be used for answer. (RFC2181 5.)
      */
     count = ntohs(header.hdr_ancount);
-    if (forward_msg_parse_resource(rrset, &handle, count, tls) < 0) {
+    if (forward_msg_parse_resource(rrset, q, &handle, count, tls) < 0) {
         dns_msg_read_close(&handle);
         return -1;
     }
@@ -282,7 +281,7 @@ forward_msg_parse(dns_cache_rrset_t *rrset, char *buf, int len, uint16_t msgid, 
 }
 
 static int
-forward_msg_parse_resource(dns_cache_rrset_t *rrset, dns_msg_handle_t *handle, int count, dns_tls_t *tls)
+forward_msg_parse_resource(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_msg_handle_t *handle, int count, dns_tls_t *tls)
 {
     int i;
     dns_msg_resource_t res;
@@ -295,7 +294,7 @@ forward_msg_parse_resource(dns_cache_rrset_t *rrset, dns_msg_handle_t *handle, i
 
         /* XXX validate resource */
 
-        if (dns_cache_add_answer(rrset, &res, tls) < 0) {
+        if (dns_cache_add_answer(rrset, q, &res, tls) < 0) {
             plog(LOG_ERR, "%s: can't add cache resource", MODULE);
             return -1;
         }

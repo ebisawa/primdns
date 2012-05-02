@@ -126,7 +126,6 @@ static data_stats_t DataStats;
 
 dns_engine_t DataEngine = {
     "data", sizeof(data_config_t),
-    DNS_FLAG_AA,
     data_setarg,
     data_init,
     data_destroy,
@@ -320,6 +319,7 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
 
     if ((index = data_query_search_head(conf, hash, q)) < 0) {
         dns_cache_setrcode(rrset, DNS_RCODE_NXDOMAIN);
+        dns_cache_setflags(rrset, DNS_FLAG_AA);
         dns_cache_negative(rrset, 0);
     } else {
         if ((record = data_hash_record(conf, hash)) == NULL)
@@ -337,7 +337,7 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
                 return -1;
             }
 
-            if (dns_cache_add_answer(rrset, &res, tls) < 0) {
+            if (dns_cache_add_answer(rrset, q, &res, tls) < 0) {
                 plog(LOG_ERR, "%s: can't add cache resource", MODULE);
                 return -1;
             }
@@ -349,6 +349,8 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
             dns_cache_setrcode(rrset, DNS_RCODE_NOERROR);
             dns_cache_negative(rrset, 0);
         }
+
+        dns_cache_setflags(rrset, DNS_FLAG_AA);
     }
 
     return count;

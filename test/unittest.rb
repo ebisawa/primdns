@@ -106,10 +106,27 @@ class Test
 
   def assert_flags(flag)
     @testmethod = current_method
-    if @digger.flags.include?(flag)
-      pass(flag)
+
+    cnot = false
+    if flag =~ /^!\s*(.+)$/
+      f = $1
+      cnot = true
     else
-      fail(flag)
+      f = flag
+    end
+
+    if @digger.flags.include?(f)
+      if cnot
+        fail(flag)
+      else
+        pass(flag)
+      end
+    else
+      if cnot
+        pass(flag)
+      else
+        fail(flag)
+      end
     end
   end
 
@@ -167,11 +184,13 @@ class Test
   private
   def assert_rdata(records, rdata, type = nil)
     @testmethod = caller_method
-    records.each do |r|
-      next if type != nil && r[:type] != type
-      if check_rdata(r[:rdata], rdata)
-        pass(rdata, type)
-        return
+    if records != nil
+      records.each do |r|
+        next if type != nil && r[:type] != type
+        if check_rdata(r[:rdata], rdata)
+          pass(rdata, type)
+          return
+        end
       end
     end
     fail(rdata, type)
@@ -179,13 +198,15 @@ class Test
 
   def assert_type(records, type)
     @testmethod = caller_method
-    records.each do |r|
-      if check_rdata(r[:type], type)
-        pass(type)
-        return
+    if records != nil
+      records.each do |r|
+        if check_rdata(r[:type], type)
+          pass(type)
+          return
+        end
       end
     end
-    fail(rdata, type)
+    fail(type)
   end
 
   def check_rdata(rdata, adata)

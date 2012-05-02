@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +37,7 @@
 #include <syslog.h>
 #include <pthread.h>
 #include "dns.h"
+#include "dns_cache.h"
 
 static void plog_print(int level, char *msg, va_list ap);
 static void plog_syslog(int level, char *msg, va_list ap);
@@ -121,7 +122,11 @@ plog_question(int level, char *module, char *msg, dns_msg_question_t *q, int cat
 {
     char *catstr;
 
-    catstr = (category == 1) ? "(internal)" : "";
+    switch (category) {
+    case DNS_CACHE_INTERNAL:  catstr = "(internal)";  break;
+    case DNS_CACHE_GLUE:      catstr = "(glue)";      break;
+    default:                  catstr = "";            break;
+    }
 
     plog(level, "%s: %s: \"%s\" %s %s %s",
          module, msg,

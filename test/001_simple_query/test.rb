@@ -11,12 +11,24 @@ test 'Simple query' do
   end
 end
 
-test 'Query NS record' do
+test 'Query A for NS' do
   query 'ns2.example.com' do
     assert_status 'NOERROR'
     assert_flags 'qr', 'aa'
     assert_answer '192.0.2.2'
     assert_authority 'ns1.example.com', 'ns2.example.com'
+    assert_additional '192.0.2.1'
+    assert_additional '2001:db8::2:2'
+    assert_additional '!192.0.2.2'
+  end
+end
+
+test 'Query NS' do
+  query 'NS example.com' do
+    assert_status 'NOERROR'
+    assert_flags 'qr', 'aa'
+    assert_answer 'ns1.example.com'
+    assert_answer 'ns2.example.com'
     assert_additional '192.0.2.1'
     assert_additional '2001:db8::2:2'
     assert_additional '!192.0.2.2'
