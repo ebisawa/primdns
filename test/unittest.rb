@@ -173,8 +173,8 @@ class Test
     assert_type(@digger.records[:authority], type)
   end
 
-  def assert_additional(rdata)
-    assert_rdata(@digger.records[:additional], rdata)
+  def assert_additional(rdata, name = nil)
+    assert_rdata(@digger.records[:additional], rdata, nil, name)
   end
 
   def assert_additional_type(type)
@@ -182,18 +182,20 @@ class Test
   end
 
   private
-  def assert_rdata(records, rdata, type = nil)
+  def assert_rdata(records, rdata, type = nil, name = nil)
     @testmethod = caller_method
     if records != nil
       records.each do |r|
         next if type != nil && r[:type] != type
+        next if name != nil && r[:name] != name
+
         if check_rdata(r[:rdata], rdata)
-          pass(rdata, type)
+          pass(rdata, type, name)
           return
         end
       end
     end
-    fail(rdata, type)
+    fail(rdata, type, name)
   end
 
   def assert_type(records, type)
@@ -223,16 +225,18 @@ class Test
     end
   end
 
-  def pass(param = nil, type = nil)
-    t = (type != nil) ? ", #{type}" : ''
+  def pass(param = nil, type = nil, name = nil)
+    t = (type != nil) ? ", \"#{type}\"" : ''
+    t = (type == nil && name != nil) ? ", \"#{name}\"" : ''
 
     print "[ PASS ] #{@testmethod}"
     print " \"#{param}\"#{t}" if param != nil
     print "\n"
   end
 
-  def fail(param = nil, type = nil)
-    t = (type != nil) ? ", #{type}" : ''
+  def fail(param = nil, type = nil, name = nil)
+    t = (type != nil) ? ", \"#{type}\"" : ''
+    t = (type == nil && name != nil) ? ", \"#{name}\"" : ''
 
     print "[ FAIL ] #{@testmethod}"
     print " \"#{param}\"#{t}" if param != nil
@@ -300,8 +304,6 @@ def assert_authority_type(type)
   $test.assert_authority_type(type)
 end
 
-def assert_additional(*rdata)
-  rdata.each do |rd|
-    $test.assert_additional(rd)
-  end
+def assert_additional(rdata, name = nil)
+  $test.assert_additional(rdata, name)
 end

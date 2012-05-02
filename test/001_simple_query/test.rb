@@ -6,7 +6,8 @@ test 'Simple query' do
     assert_flags 'qr', 'aa'
     assert_answer '192.0.2.10'
     assert_authority 'ns1.example.com', 'ns2.example.com'
-    assert_additional '192.0.2.1', '192.0.2.2'
+    assert_additional '192.0.2.1'
+    assert_additional '192.0.2.2'
     assert_additional '2001:db8::2:2'
   end
 end
