@@ -44,7 +44,6 @@
 
 #define DNS_CACHE_GLOBAL                 0
 #define DNS_CACHE_INTERNAL               1
-#define DNS_CACHE_GLUE                   2
 
 #define DNS_CACHE_LIST_HEAD(list)        ((dns_cache_t *) dns_list_head((list)))
 #define DNS_CACHE_LIST_NEXT(list, elem)  ((dns_cache_t *) dns_list_next((list), (dns_list_elem_t *) (elem)))
