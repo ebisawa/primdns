@@ -147,11 +147,11 @@ dns_config_notify_all_engines(void)
 
     /* assume this is the main thread */
     tls = dns_session_main_tls();
-    zone = (dns_config_zone_t *) dns_list_head(&ConfigRoot->r_zone);
+    zone = DNS_CONFIG_ZONE_LIST_HEAD(&ConfigRoot->r_zone);
 
     while (zone != NULL) {
         dns_engine_notify(zone, NULL, tls);
-        zone = (dns_config_zone_t *) dns_list_next(&ConfigRoot->r_zone, &zone->z_elem);
+        zone = DNS_CONFIG_ZONE_LIST_NEXT(&ConfigRoot->r_zone, zone);
     }
 }
 
@@ -173,6 +173,7 @@ dns_config_find_zone(int *exact, char *name, int klass)
     buflen = strlen(buf);
 
     zone = DNS_CONFIG_ZONE_LIST_HEAD(&root->r_zone);
+
     while (zone != NULL) {
         if (zone->z_class != klass && klass != DNS_CLASS_ANY)
             goto next;
@@ -252,9 +253,10 @@ config_free(dns_config_root_t *root)
 {
     dns_config_zone_t *zone, *next;
 
-    zone = (dns_config_zone_t *) dns_list_head(&root->r_zone);
+    zone = DNS_CONFIG_ZONE_LIST_HEAD(&root->r_zone);
+
     for (; zone != NULL; zone = next) {
-        next = (dns_config_zone_t *) dns_list_next(&root->r_zone, &zone->z_elem);
+        next = DNS_CONFIG_ZONE_LIST_NEXT(&root->r_zone, zone);
         config_free_zone(zone);
     }
 
@@ -275,6 +277,7 @@ config_free_zone_search(dns_config_zone_search_t *zs)
     dns_config_zone_engine_t *ze, *next;
 
     ze = (dns_config_zone_engine_t *) dns_list_head(&zs->zs_engine);
+
     for (; ze != NULL; ze = next) {
         next = (dns_config_zone_engine_t *) dns_list_next(&zs->zs_engine, &ze->ze_elem);
         config_free_zone_engine(ze);
