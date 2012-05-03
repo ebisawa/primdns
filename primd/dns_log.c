@@ -124,7 +124,6 @@ plog_question(int level, char *module, char *msg, dns_msg_question_t *q, int cat
 
     switch (category) {
     case DNS_CACHE_INTERNAL:  catstr = "(internal)";  break;
-    case DNS_CACHE_GLUE:      catstr = "(glue)";      break;
     default:                  catstr = "";            break;
     }
 
