@@ -615,12 +615,14 @@ session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf)
     dns_cache_rrset_t *rrset;
 
     q = &session->sess_question;
+
     if ((rrset = dns_cache_lookup(q, 0, &session->sess_tls)) == NULL) {
         if ((rrset = session_query_recursive(session, session->sess_zone, q, 0)) == NULL)
             return NULL;
 
         /* NS as referral is a nonauthoritative resource */
         q = &session->sess_qlast;
+
         if (q->mq_type == DNS_TYPE_NS) {
             if (!session->sess_zone_exact)
                 dns_cache_delete_answers(rrset, &session->sess_tls);
@@ -647,14 +649,11 @@ session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset_an)
 
             return rrset_ns;
         }
-
-        plog(LOG_DEBUG, "%s: referral is not found", __func__);
     }
 
     if (dns_cache_getflags(rrset_an) & DNS_FLAG_AA) {
-        plog(LOG_DEBUG, "%s: authoritative answer", MODULE);
-
         q = &session->sess_question;
+
         if (dns_list_count(&rrset_an->rrset_list_answer) == 0) {
             if ((session->sess_extflags & SESSION_NO_NCACHE) == 0)
                 rrset_ns = session_query_zone(session, q, DNS_TYPE_SOA);
@@ -811,13 +810,13 @@ session_query_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrs
     dns_msg_parse_name(q_cname.mq_name, &cache->cache_res);
     memcpy(&session->sess_qlast, &q_cname, sizeof(q_cname));
 
-    plog(LOG_DEBUG, "%s: restart query for CNAME: %s", MODULE, q_cname.mq_name);
-
     if ((zone = dns_config_find_zone(&session->sess_zone_exact,
                                      q_cname.mq_name, q_cname.mq_class)) == NULL) {
         session->sess_extflags |= SESSION_NO_NCACHE;
         return;
     }
+
+    plog(LOG_DEBUG, "%s: restart query for CNAME: %s", MODULE, q_cname.mq_name);
 
     if ((rr_cname = session_query_recursive(session, zone, &q_cname, nlevel)) != NULL) {
         plog(LOG_DEBUG, "%s: %d answers for CNAME", MODULE, dns_list_count(&rr_cname->rrset_list_answer));
@@ -927,6 +926,9 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
         session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_A);
         session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_AAAA);
     }
+
+    session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_A);
+    session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_AAAA);
 
     /* edns opt */
     if (session->sess_extflags & SESSION_EDNS_REQUESTED)
