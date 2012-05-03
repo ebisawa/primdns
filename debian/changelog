@@ -1,3 +1,9 @@
+primdns (0.8.1) unstable; urgency=low
+
+  * fix inappropriate handling of CNAMEs
+
+ -- Satoshi Ebisawa <ebisawa@gmail.com>  Thu,  3 May 2012 17:33:01 +0900
+
 primdns (0.8) unstable; urgency=low
 
   * 0.8
