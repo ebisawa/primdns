@@ -192,7 +192,7 @@ plog_print(int level, char *msg, va_list ap)
 #if 0
     printf("%5u ", (unsigned) getpid());
 #endif
-    printf("0x%08x ", (unsigned) pthread_self());
+    printf("0x%08x ", (unsigned)(uintptr_t) pthread_self());
 
     switch (level) {
     case LOG_CRIT:      printf("[CRIT] ");      break;
