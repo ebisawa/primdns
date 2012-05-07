@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,6 +48,7 @@
 #define MSG_READ16(dest, handle)   do { int x; if ((x = msg_read16(handle)) < 0) { return -1; } (dest) = x; } while (0)
 #define MSG_READ32(dest, handle)   do { int x; if ((x = msg_read32(handle)) < 0) { return -1; } (dest) = x; } while (0)
 
+static void *msg_mfetch16(void *dst, void *src);
 static void *msg_mfetch32(void *dst, void *src);
 static int msg_read16(dns_msg_handle_t *handle);
 static int msg_read32(dns_msg_handle_t *handle);
@@ -280,9 +281,9 @@ dns_msg_buffer(dns_msg_handle_t *handle)
 }
 
 int
-dns_msg_parse_name(char *cname, dns_msg_resource_t *res)
+dns_msg_parse_name(char *name, dns_msg_resource_t *res)
 {
-    return msg_decode_raw_name(cname, DNS_NAME_MAX, res->mr_data);
+    return msg_decode_raw_name(name, DNS_NAME_MAX, res->mr_data);
 }
 
 int
@@ -304,9 +305,31 @@ dns_msg_parse_soa(char *mname, char *rname, uint32_t *serial, uint32_t *refresh,
 }
 
 int
+dns_msg_parse_mx(uint16_t *pref, char *name, dns_msg_resource_t *res)
+{
+    uint8_t *p;
+
+    p = (uint8_t *) res->mr_data;
+    p = msg_mfetch16(pref, p);
+
+    return msg_decode_raw_name(name, DNS_NAME_MAX, p);
+}
+
+int
 dns_msg_encode_name(void *dst, int dstmax, char *name)
 {
     return msg_encode_name(dst, dstmax, name);
+}
+
+static void *
+msg_mfetch16(void *dst, void *src)
+{
+    uint16_t *s = (uint16_t *) src;
+
+    if (dst != NULL)
+        *((uint16_t *) dst) = ntohs(*s);
+
+    return s + 1;
 }
 
 static void *

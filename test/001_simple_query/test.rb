@@ -17,7 +17,8 @@ test 'Query A for NS' do
     assert_status 'NOERROR'
     assert_flags 'qr', 'aa'
     assert_answer '192.0.2.2'
-    assert_authority 'ns1.example.com', 'ns2.example.com'
+    assert_authority 'ns1.example.com'
+    assert_authority 'ns2.example.com'
     assert_additional '192.0.2.1'
     assert_additional '2001:db8::2:2'
     assert_additional '!192.0.2.2'
@@ -33,6 +34,24 @@ test 'Query NS' do
     assert_additional '192.0.2.1'
     assert_additional '2001:db8::2:2'
     assert_additional '!192.0.2.2'
+  end
+end
+
+test 'Query MX' do
+  query 'MX e.example.com' do
+    assert_status 'NOERROR'
+    assert_flags 'qr', 'aa'
+    assert_answer '10 f.example.com'
+    assert_answer '20 g.example.com'
+    assert_authority 'ns1.example.com'
+    assert_authority 'ns2.example.com'
+    assert_additional '192.0.2.1'
+    assert_additional '192.0.2.2'
+    assert_additional '2001:db8::2:2'
+    assert_additional '192.0.2.20', 'f.example.com'
+    assert_additional '2001:db8::2:20', 'f.example.com'
+    assert_additional '192.0.2.21', 'g.example.com'
+    assert_additional '2001:db8::2:21', 'g.example.com'
   end
 end
 

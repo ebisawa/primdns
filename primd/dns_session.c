@@ -916,14 +916,16 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
     session_write_resources_rr(session, &handle, &rrset_an->rrset_list_answer, DNS_MSG_RESTYPE_ANSWER);
 
     /* authority & additional */
-    if (rrset_ns != NULL) {
+    if (rrset_ns != NULL)
         session_write_resources_rr(session, &handle, &rrset_ns->rrset_list_answer, DNS_MSG_RESTYPE_AUTHORITY);
-        session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_A);
-        session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_AAAA);
-    }
 
     session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_A);
     session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_AAAA);
+
+    if (rrset_ns != NULL) {
+        session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_A);
+        session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_AAAA);
+    }
 
     /* edns opt */
     if (session->sess_extflags & SESSION_EDNS_REQUESTED)
@@ -1090,16 +1092,27 @@ session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns
     cache = DNS_CACHE_LIST_HEAD(list);
 
     while (cache != NULL) {
-        if (cache->cache_res.mr_q.mq_type == DNS_TYPE_NS) {
-            dns_msg_parse_name(q_a.mq_name, &cache->cache_res);
-            q_a.mq_type = type;
-            q_a.mq_class = cache->cache_res.mr_q.mq_class;
+        q_a.mq_type = type;
+        q_a.mq_class = cache->cache_res.mr_q.mq_class;
 
-            if (session_compare_question(q, &q_a) == 0)
+        switch (cache->cache_res.mr_q.mq_type) {
+        case DNS_TYPE_NS:
+            if (dns_msg_parse_name(q_a.mq_name, &cache->cache_res) < 0) {
+                plog(LOG_ERR, "%s: dns_msg_parse_name() failed", MODULE);
                 return;
+            }
+            break;
 
-            session_write_resources_ar_q(session, handle, &q_a);
+        case DNS_TYPE_MX:
+            if (dns_msg_parse_mx(NULL, q_a.mq_name, &cache->cache_res) < 0) {
+                plog(LOG_ERR, "%s: dns_msg_parse_mx() failed", MODULE);
+                return;
+            }
+            break;
         }
+
+        if (session_compare_question(q, &q_a) != 0)
+            session_write_resources_ar_q(session, handle, &q_a);
 
         cache = DNS_CACHE_LIST_NEXT(list, cache);
     }

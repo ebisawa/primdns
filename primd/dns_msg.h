@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,8 +76,9 @@ int dns_msg_write_resource(dns_msg_handle_t *handle, dns_msg_resource_t *res, in
 
 void *dns_msg_buffer(dns_msg_handle_t *handle);
 
-int dns_msg_parse_name(char *cname, dns_msg_resource_t *res);
+int dns_msg_parse_name(char *name, dns_msg_resource_t *res);
 int dns_msg_parse_soa(char *mname, char *rname, uint32_t *serial, uint32_t *refresh, uint32_t *retry, uint32_t *expire, uint32_t *minimum, dns_msg_resource_t *res);
+int dns_msg_parse_mx(uint16_t *pref, char *name, dns_msg_resource_t *res);
 
 int dns_msg_encode_name(void *dst, int dstmax, char *name);
 
