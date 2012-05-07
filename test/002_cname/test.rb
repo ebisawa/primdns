@@ -28,7 +28,6 @@ test 'Query CNAME by unknown type' do
   end
 end
 
-
 test 'Query CNAME (referring to nonexistent name)' do
   query 'c.example.com' do
     assert_status 'NXDOMAIN'
@@ -66,14 +65,13 @@ test 'Query CNAME itself (referring to out-of-zone name)' do
   end
 end
 
-
-test 'Query CNAME (referriing to delegated zone)' do
+test 'Query CNAME (referring to delegated zone)' do
   query 'e.example.com' do
     assert_status 'NOERROR'
     assert_flags 'qr', 'aa'
     assert_answer 'x.sub.example.com', 'CNAME'
     assert_authority 'ns.example.jp'
-#    assert_noadditional
+    assert_noadditional
   end
 end
 
