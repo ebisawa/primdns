@@ -11,8 +11,23 @@ test 'Query domain name in delegated zone (1)' do
   end
 end
 
-test 'Query domain name in delegated zone (2)' do
+test 'Query domain name in delegated zone (2.1)' do
   query 'x.sub2.example.com' do
+    assert_status 'NOERROR'
+    assert_flags 'qr', '!aa'
+    assert_noanswer
+    assert_authority 'ns1.sub2.example.com'
+    assert_authority 'ns2.sub2.example.com'
+
+    assert_additional '192.0.2.11', 'ns1.sub2.example.com'
+    assert_additional '192.0.2.12', 'ns2.sub2.example.com'
+    assert_additional '2001:db8::2:11', 'ns1.sub2.example.com'
+    assert_additional '2001:db8::2:12', 'ns2.sub2.example.com'
+  end
+end
+
+test 'Query domain name in delegated zone (2.2)' do
+  query 'sub2.example.com' do
     assert_status 'NOERROR'
     assert_flags 'qr', '!aa'
     assert_noanswer

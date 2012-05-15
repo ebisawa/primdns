@@ -95,6 +95,7 @@ static int session_check_question_header(dns_header_t *header);
 static dns_cache_rrset_t *session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf);
 static dns_cache_rrset_t *session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset);
 static dns_cache_rrset_t *session_query_referral(dns_session_t *session);
+static dns_cache_rrset_t *session_query_referral_do(dns_session_t *session, char *name);
 static dns_cache_rrset_t *session_query_recursive(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q, int nlevel);
 static void session_query_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel);
 static int session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type);
@@ -614,14 +615,12 @@ session_query_answer(dns_session_t *session, dns_sock_buf_t *sbuf)
     dns_cache_rrset_t *rrset;
 
     q = &session->sess_question;
-
     if ((rrset = dns_cache_lookup(q, 0, &session->sess_tls)) == NULL) {
         if ((rrset = session_query_recursive(session, session->sess_zone, q, 0)) == NULL)
             return NULL;
 
         /* NS as referral is a nonauthoritative resource */
         q = &session->sess_qlast;
-
         if (q->mq_type == DNS_TYPE_NS) {
             if (!session->sess_zone_exact)
                 dns_cache_delete_answers(rrset, &session->sess_tls);
@@ -669,36 +668,46 @@ static dns_cache_rrset_t *
 session_query_referral(dns_session_t *session)
 {
     char *p;
-    int zlen;
-    dns_msg_question_t *q, q_ns;
+    int offs;
     dns_cache_rrset_t *rrset;
 
-    q = &session->sess_qlast;
-    q_ns.mq_type = DNS_TYPE_NS;
-    q_ns.mq_class = q->mq_class;
+    offs = strlen(session->sess_qlast.mq_name) - strlen(session->sess_zone->z_name);
+    p = &session->sess_qlast.mq_name[offs];
 
-    p = q->mq_name;
-    zlen = strlen(session->sess_zone->z_name);
+    if (offs < 2)
+        return NULL;
 
-    /* XXX */
-    do {
-        if (strlen(p) <= zlen)
-            break;
-
-        STRLCPY(q_ns.mq_name, p, sizeof(q_ns.mq_name));
-
-        plog(LOG_DEBUG, "%s: query referral: %s %s %s",
-             MODULE, q_ns.mq_name,
-             dns_proto_class_string(q_ns.mq_class),
-             dns_proto_type_string(q_ns.mq_type));
-
-        if ((rrset = session_query_internal(session, session->sess_zone, &q_ns)) != NULL) {
-            if (dns_list_count(&rrset->rrset_list_answer) > 0)
+    for (offs -= 2, p -= 2; offs >= 0; offs--, p--) {
+        if (offs == 0 || *(p - 1) == '.') {
+            if ((rrset = session_query_referral_do(session, p)) != NULL)
                 return rrset;
-
-            dns_cache_release(rrset, &session->sess_tls);
         }
-    } while ((p = strchr(p, '.')) != NULL && p++);
+    }
+
+    return NULL;
+}
+
+static dns_cache_rrset_t *
+session_query_referral_do(dns_session_t *session, char *name)
+{
+    dns_msg_question_t q_ns;
+    dns_cache_rrset_t *rrset;
+
+    STRLCPY(q_ns.mq_name, name, sizeof(q_ns.mq_name));
+    q_ns.mq_type = DNS_TYPE_NS;
+    q_ns.mq_class = session->sess_qlast.mq_class;
+
+    plog(LOG_DEBUG, "%s: query referral: %s %s %s",
+         MODULE, q_ns.mq_name,
+         dns_proto_class_string(q_ns.mq_class),
+         dns_proto_type_string(q_ns.mq_type));
+
+    if ((rrset = session_query_internal(session, session->sess_zone, &q_ns)) != NULL) {
+        if (dns_list_count(&rrset->rrset_list_answer) > 0)
+            return rrset;
+
+        dns_cache_release(rrset, &session->sess_tls);
+    }
 
     return NULL;
 }
