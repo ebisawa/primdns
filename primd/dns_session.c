@@ -728,7 +728,7 @@ session_query_recursive(dns_session_t *session, dns_config_zone_t *zone, dns_msg
 static void
 session_query_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrset_t *rrset, int nlevel)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
     dns_cache_rrset_t *rr_cname;
     dns_config_zone_t *zone;
     dns_msg_question_t q_cname;
@@ -766,7 +766,7 @@ static int
 session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type)
 {
     int result = -1;
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
     dns_cache_rrset_t *rrset;
 
     if ((rrset = session_query_zone(session, q, type)) != NULL) {
@@ -1055,7 +1055,7 @@ session_write_header(dns_session_t *session, dns_msg_handle_t *handle, void *buf
 static void
 session_write_resources(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
     cache = DNS_CACHE_LIST_HEAD(list);
     while (cache != NULL) {
@@ -1070,7 +1070,7 @@ static void
 session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype)
 {
     int i, j;
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
     dns_msg_resource_t *cres[32];
 
     cache = DNS_CACHE_LIST_HEAD(list);
@@ -1094,7 +1094,7 @@ session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns
 static void
 session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int type)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
     dns_msg_question_t *q, q_a;
 
     q = &session->sess_question;
@@ -1130,7 +1130,7 @@ session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns
 static void
 session_write_resources_ar_q(dns_session_t *session, dns_msg_handle_t *handle, dns_msg_question_t *q)
 {
-    dns_cache_t *ca_a;
+    dns_cache_res_t *ca_a;
     dns_cache_rrset_t *rrset;
 
     if ((rrset = session_query_glue(session, q)) != NULL) {

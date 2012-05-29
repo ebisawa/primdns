@@ -33,7 +33,9 @@
 #include "dns.h"
 #include "dns_list.h"
 
-#define DNS_CACHE_SIZE_MAX               2048   /* MB */
+#define DNS_CACHE_SIZE_DEF               32              /* KB per thread */
+#define DNS_CACHE_SIZE_MIN               (1024 * 1)      /* KB */
+#define DNS_CACHE_SIZE_MAX               (1024 * 2048)   /* KB */
 
 #define DNS_CACHE_HASH_ARRAY_SIZE        3
 
@@ -42,16 +44,16 @@
 #define DNS_CACHE_TTL_NEGATIVE_MAX       3600
 #define DNS_CACHE_TTL_NEGATIVE_DEFAULT   300
 
-#define DNS_CACHE_GLOBAL                 0
+#define DNS_CACHE_PUBLIC                 0
 #define DNS_CACHE_INTERNAL               1
 
-#define DNS_CACHE_LIST_HEAD(list)        ((dns_cache_t *) dns_list_head((list)))
-#define DNS_CACHE_LIST_NEXT(list, elem)  ((dns_cache_t *) dns_list_next((list), (dns_list_elem_t *) (elem)))
+#define DNS_CACHE_LIST_HEAD(list)        ((dns_cache_res_t *) dns_list_head((list)))
+#define DNS_CACHE_LIST_NEXT(list, elem)  ((dns_cache_res_t *) dns_list_next((list), (dns_list_elem_t *) (elem)))
 
 typedef struct {
     dns_list_elem_t      cache_elem;
     dns_msg_resource_t   cache_res;
-} dns_cache_t;
+} dns_cache_res_t;
 
 typedef struct {
     dns_msg_question_t   rrset_question;
@@ -65,7 +67,7 @@ typedef struct {
     dns_list_t           rrset_list_cname;
 } dns_cache_rrset_t;
 
-int dns_cache_init(int cache_mb, int threads);
+int dns_cache_init(int cache_kb, int threads);
 dns_cache_rrset_t *dns_cache_new(dns_msg_question_t *q, dns_tls_t *tls);
 dns_cache_rrset_t *dns_cache_lookup(dns_msg_question_t *q, int category, dns_tls_t *tls);
 void dns_cache_release(dns_cache_rrset_t *rrset, dns_tls_t *tls);

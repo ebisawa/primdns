@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,7 +49,7 @@ dns_pool_init(dns_pool_t *pool, int esize, int count)
         return -1;
     }
 
-    plog(LOG_DEBUG, "%s: allocate %dk bytes", MODULE, (esize * count) / 1024);
+    plog(LOG_DEBUG, "%s: allocate %d kib", MODULE, (esize * count) / 1024);
 
     if (dns_abq_init(&pool->pool_abq, count, &AbqThreadSafeLockFree) < 0) {
         free(pool->pool_data);

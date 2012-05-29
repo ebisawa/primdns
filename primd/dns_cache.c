@@ -65,11 +65,15 @@ typedef struct {
     dns_cache_rrset_t  *hash_array[DNS_CACHE_HASH_ARRAY_SIZE];
 } cache_hash_t;
 
-static cache_stats_t CacheStats;
-static cache_hash_t *CacheHash;
+typedef union {
+    dns_cache_res_t     cu_res;
+    dns_cache_rrset_t   cu_rrset;
+} cache_u_t;
+
 static unsigned CacheHashCount;
+static cache_hash_t *CacheHash;
+static cache_stats_t CacheStats;
 static dns_mpool_t CachePool;
-static dns_mpool_t CacheSetPool;
 
 static dns_cache_rrset_t *cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_new(dns_msg_question_t *q, dns_tls_t *tls);
@@ -90,26 +94,30 @@ static int cache_rrset_unregister(cache_hash_t *hash, dns_cache_rrset_t *rrset, 
 static dns_cache_rrset_t *cache_rrset_drain(dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_drain_one(dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_drain_hash(cache_hash_t *hash, dns_tls_t *tls);
-static void cache_rrset_set_expire(dns_cache_rrset_t *rrset, dns_cache_t *cache);
+static void cache_rrset_set_expire(dns_cache_rrset_t *rrset, dns_cache_res_t *cache);
 static cache_hash_t *cache_hash(unsigned *value, dns_msg_question_t *q, int category);
-static dns_cache_t *cache_get(dns_tls_t *tls);
-static dns_cache_t *cache_drain(dns_tls_t *tls);
-static void cache_init(dns_cache_t *cache, dns_msg_resource_t *res);
+static dns_cache_res_t *cache_get(dns_tls_t *tls);
+static dns_cache_res_t *cache_drain(dns_tls_t *tls);
+static void cache_init(dns_cache_res_t *cache, dns_msg_resource_t *res);
 static void cache_update_ttl(dns_cache_rrset_t *rrset, int ttl);
 static void cache_update_ttl_list(dns_list_t *list, int ttl);
 
 int
-dns_cache_init(int cache_mb, int threads)
+dns_cache_init(int cache_kb, int threads)
 {
     int units;
-    static int N = 4;
 
-    if (cache_mb < 1 || cache_mb > DNS_CACHE_SIZE_MAX) {
-        plog(LOG_ERR, "%s: invalid cache size %d (max %d)", MODULE, cache_mb, DNS_CACHE_SIZE_MAX);
+    if (cache_kb > DNS_CACHE_SIZE_MAX) {
+        plog(LOG_ERR, "%s: invalid cache size (max %d mib)", MODULE, DNS_CACHE_SIZE_MAX / 1024);
         return -1;
     }
 
-    units = (cache_mb * 1024 * 1024) / (sizeof(dns_cache_rrset_t) + sizeof(dns_cache_t) * N);
+    if (cache_kb == 0)
+        cache_kb = DNS_CACHE_SIZE_DEF * threads;
+    else if (cache_kb < DNS_CACHE_SIZE_MIN)
+        cache_kb = DNS_CACHE_SIZE_MIN;
+
+    units = (cache_kb * 1024) / sizeof(cache_u_t);
     CacheHashCount = dns_util_euler_primish(units);
 
     if ((CacheHash = calloc(1, sizeof(cache_hash_t) * CacheHashCount)) == NULL) {
@@ -117,10 +125,8 @@ dns_cache_init(int cache_mb, int threads)
         return -1;
     }
 
-    plog(LOG_DEBUG, "%s: allocate %d megabytes (%d units)", MODULE, cache_mb, units);
-
-    dns_mpool_init(&CachePool, sizeof(dns_cache_t), units * N, threads);
-    dns_mpool_init(&CacheSetPool, sizeof(dns_cache_rrset_t), units, threads);
+    plog(LOG_DEBUG, "%s: allocate %d kib (%d units) for %d threads", MODULE, cache_kb, units, threads);
+    dns_mpool_init(&CachePool, sizeof(cache_u_t), units, threads);
 
     return 0;
 }
@@ -171,7 +177,7 @@ dns_cache_release(dns_cache_rrset_t *rrset, dns_tls_t *tls)
 int
 dns_cache_add_answer(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_msg_resource_t *res, dns_tls_t *tls)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
     if ((cache = cache_get(tls)) == NULL)
         return -1;
@@ -221,7 +227,7 @@ dns_cache_negative(dns_cache_rrset_t *rrset, uint32_t ttl)
 void
 dns_cache_merge(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_cache_rrset_t *rr_m, dns_tls_t *tls)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
     cache = DNS_CACHE_LIST_HEAD(&rr_m->rrset_list_cname);
     while (cache != NULL) {
@@ -361,7 +367,7 @@ cache_rrset_new(dns_msg_question_t *q, dns_tls_t *tls)
 {
     dns_cache_rrset_t *rrset;
 
-    if ((rrset = (dns_cache_rrset_t *) dns_mpool_get(&CacheSetPool, tls->tls_id)) == NULL) {
+    if ((rrset = (dns_cache_rrset_t *) dns_mpool_get(&CachePool, tls->tls_id)) == NULL) {
         if ((rrset = cache_rrset_drain(tls)) == NULL)
             return NULL;
     }
@@ -527,9 +533,9 @@ retry:
 static void
 cache_rrset_delete_answers(dns_cache_rrset_t *rrset, dns_tls_t *tls)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
-    while ((cache = (dns_cache_t *) dns_list_pop(&rrset->rrset_list_answer)) != NULL)
+    while ((cache = (dns_cache_res_t *) dns_list_pop(&rrset->rrset_list_answer)) != NULL)
         dns_mpool_release(&CachePool, cache, tls->tls_id);
 }
 
@@ -537,17 +543,17 @@ static void
 cache_rrset_free(dns_cache_rrset_t *rrset, dns_tls_t *tls)
 {
     cache_rrset_reset(rrset, tls);
-    dns_mpool_release(&CacheSetPool, rrset, tls->tls_id);
+    dns_mpool_release(&CachePool, rrset, tls->tls_id);
 }
 
 static void
 cache_rrset_reset(dns_cache_rrset_t *rrset, dns_tls_t *tls)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
-    while ((cache = (dns_cache_t *) dns_list_pop(&rrset->rrset_list_cname)) != NULL)
+    while ((cache = (dns_cache_res_t *) dns_list_pop(&rrset->rrset_list_cname)) != NULL)
         dns_mpool_release(&CachePool, cache, tls->tls_id);
-    while ((cache = (dns_cache_t *) dns_list_pop(&rrset->rrset_list_answer)) != NULL)
+    while ((cache = (dns_cache_res_t *) dns_list_pop(&rrset->rrset_list_answer)) != NULL)
         dns_mpool_release(&CachePool, cache, tls->tls_id);
 
     rrset->rrset_refs = 0;
@@ -720,7 +726,7 @@ cache_rrset_drain_hash(cache_hash_t *hash, dns_tls_t *tls)
 }
 
 static void
-cache_rrset_set_expire(dns_cache_rrset_t *rrset, dns_cache_t *cache)
+cache_rrset_set_expire(dns_cache_rrset_t *rrset, dns_cache_res_t *cache)
 {
     time_t expire;
 
@@ -748,12 +754,12 @@ cache_hash(unsigned *value, dns_msg_question_t *q, int category)
     return &CacheHash[h % CacheHashCount];
 }
 
-static dns_cache_t *
+static dns_cache_res_t *
 cache_get(dns_tls_t *tls)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
-    if ((cache = (dns_cache_t *) dns_mpool_get(&CachePool, tls->tls_id)) != NULL)
+    if ((cache = (dns_cache_res_t *) dns_mpool_get(&CachePool, tls->tls_id)) != NULL)
         return cache;
     if ((cache = cache_drain(tls)) != NULL)
         return cache;
@@ -761,21 +767,21 @@ cache_get(dns_tls_t *tls)
     return NULL;
 }
 
-static dns_cache_t *
+static dns_cache_res_t *
 cache_drain(dns_tls_t *tls)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
     dns_cache_rrset_t *rrset;
 
     for (;;) {
         if ((rrset = cache_rrset_drain_one(tls)) == NULL)
             return NULL;
         else {
-            if ((cache = (dns_cache_t *) dns_list_pop(&rrset->rrset_list_answer)) == NULL)
-                cache = (dns_cache_t *) dns_list_pop(&rrset->rrset_list_cname);
+            if ((cache = (dns_cache_res_t *) dns_list_pop(&rrset->rrset_list_answer)) == NULL)
+                cache = (dns_cache_res_t *) dns_list_pop(&rrset->rrset_list_cname);
 
             cache_rrset_reset(rrset, tls);
-            dns_mpool_release(&CacheSetPool, rrset, tls->tls_id);
+            dns_mpool_release(&CachePool, rrset, tls->tls_id);
 
             if (cache != NULL)
                 break;
@@ -788,7 +794,7 @@ cache_drain(dns_tls_t *tls)
 }
 
 static void
-cache_init(dns_cache_t *cache, dns_msg_resource_t *res)
+cache_init(dns_cache_res_t *cache, dns_msg_resource_t *res)
 {
     memcpy(&cache->cache_res, res, sizeof(*res));
     STRLOWER(cache->cache_res.mr_q.mq_name);
@@ -809,7 +815,7 @@ cache_update_ttl(dns_cache_rrset_t *rrset, int ttl)
 static void
 cache_update_ttl_list(dns_list_t *list, int ttl)
 {
-    dns_cache_t *cache;
+    dns_cache_res_t *cache;
 
     cache = DNS_CACHE_LIST_HEAD(list);
     while (cache != NULL) {

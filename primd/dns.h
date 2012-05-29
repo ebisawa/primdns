@@ -41,7 +41,7 @@
 #define PATH_PID      "/var/run/primd.pid"
 #define PATH_CONTROL  "/var/run/primd.control"
 
-#define DNS_DEFAULT_CACHE_SIZE       1
+#define DNS_DEFAULT_CACHE_SIZE       0
 #define DNS_DEFAULT_WORKER_THREADS   0
 
 typedef struct {
