@@ -3,7 +3,7 @@ primdns (0.8.2) unstable; urgency=low
   * fix not responding additional records in certain situation
   * fix to search referrals correctly
 
--- Satoshi Ebisawa <ebisawa@gmail.com>  Thu,  3 May 2012 17:33:01 +0900
+ -- Satoshi Ebisawa <ebisawa@gmail.com>  Thu,  3 May 2012 17:33:01 +0900
 
 primdns (0.8.1) unstable; urgency=low
 
