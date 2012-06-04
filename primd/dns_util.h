@@ -37,6 +37,10 @@
 
 #define FNV1_INITIAL_BASIS       2166136261U   /* 32bit FNV-1 hash */
 
+#ifdef ALIGN
+# undef ALIGN
+#endif
+
 #define ALIGN(p)                 (((((uintptr_t) (p)) + (sizeof(int) - 1)) / sizeof(int)) * sizeof(int))
 #define NELEMS(array)            (sizeof(array) / sizeof(array[0]))
 
