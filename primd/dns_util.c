@@ -392,7 +392,7 @@ dns_util_fexist(char *filename)
 }
 
 int
-dns_util_spawn(char *cmd, char **argv, int stdout)
+dns_util_spawn(char *cmd, char **argv, int out)
 {
     int status;
     pid_t pchild, pgchild, rpid;
@@ -407,7 +407,7 @@ dns_util_spawn(char *cmd, char **argv, int stdout)
          * child process:
          * don't call log functions because these are not async-signal-safe.
          */
-        if (stdout > 0 && dup2(stdout, 1) < 0)
+        if (out > 0 && dup2(out, 1) < 0)
             exit(EXIT_FAILURE);
         if ((pgchild = fork()) < 0)
             exit(EXIT_FAILURE);

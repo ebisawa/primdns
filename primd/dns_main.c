@@ -156,8 +156,8 @@ main_args(int argc, char *argv[])
     int i;
 
     for (i = 1; i < argc; i++) {
-        if (*argv[i] == '-') {
-            switch (*++argv[i]) {
+        if (argv[i][0] == '-') {
+            switch (argv[i][1]) {
             case '4':
                 Options.opt_ipv6_enable = 0;
                 break;
