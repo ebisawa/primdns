@@ -610,10 +610,10 @@ class TinyZone < BaseZone
   end
 
   def make_record_ns_a(params)
-    if params[2] =~ /^\d+$/
-      mname = "#{params[2]}.ns.#{params[0]}"
-    else
+    if params[2] =~ /\./
       mname = params[2]
+    else
+      mname = "#{params[2]}.ns.#{params[0]}"
     end
     rname = "hostmaster.#{params[0]}"
 
@@ -624,10 +624,10 @@ class TinyZone < BaseZone
   end
 
   def make_record_soa_ns_a(params)
-    if params[2] =~ /^\d+$/
-      mname = "#{params[2]}.ns.#{params[0]}"
-    else
+    if params[2] =~ /\./
       mname = params[2]
+    else
+      mname = "#{params[2]}.ns.#{params[0]}"
     end
     rname = "hostmaster.#{params[0]}"
 
