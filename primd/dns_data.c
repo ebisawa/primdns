@@ -107,7 +107,7 @@ static int data_destroy(dns_engine_param_t *ep);
 static int data_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls);
 static int data_dumpnext(dns_engine_param_t *ep, dns_msg_resource_t *res, dns_engine_dump_t *edump);
 
-static int data_validate(data_header_t *header);
+static int data_validate(data_header_t *header, int size);
 static int data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_question_t *q, dns_tls_t *tls);
 static int data_query_search_head(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q);
 static int data_query_bsearch(data_config_t *conf, data_hash_t *hash, dns_msg_question_t *q);
@@ -204,14 +204,14 @@ data_init(dns_engine_param_t *ep)
         return -1;
     }
 
-    plog(LOG_DEBUG, "%s: fd = %d, mmap = %p", MODULE, fd, p);
-
     header = (data_header_t *) p;
-    if (data_validate(header) < 0) {
+    if (data_validate(header, size) < 0) {
         munmap(p, size);
         close(fd);
         return -1;
     }
+
+    plog(LOG_DEBUG, "%s: fd = %d, mmap = %p", MODULE, fd, p);
 
     conf->conf_fd = fd;
     conf->conf_data = (uint8_t *) p;
@@ -288,8 +288,13 @@ data_dumpnext(dns_engine_param_t *ep, dns_msg_resource_t *res, dns_engine_dump_t
 }
 
 static int
-data_validate(data_header_t *header)
+data_validate(data_header_t *header, int size)
 {
+    if (size < sizeof(data_header_t)) {
+        plog(LOG_ERR, "%s: too small file size", MODULE);
+        return -1;
+    }
+
     if (ntohl(header->df_magic) != DATA_MAGIC) {
         plog(LOG_ERR, "%s: file magic mismatch", MODULE);
         return -1;
