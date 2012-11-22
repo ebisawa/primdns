@@ -48,8 +48,9 @@
 
 static void notify_each_addr4(uint32_t addr, uint32_t mask, void *zone_name);
 static int notify_send(struct sockaddr *to, char *zone_name);
-static int notify_send_sock(dns_sock_t *sock, char *zone_name);
+static int notify_send_message(dns_sock_t *sock, char *zone_name);
 static int notify_make_message(char *buf, int bufmax, char *zone_name);
+
 static int notify_sock_select(dns_sock_t *sock, int thread_id);
 static int notify_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
@@ -117,29 +118,31 @@ notify_send(struct sockaddr *to, char *zone_name)
         return -1;
     }
 
-    return notify_send_sock(sock, zone_name);
+    if (notify_send_message(sock, zone_name) < 0) {
+        plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
+        dns_sock_free(sock);
+        return -1;
+    }
+
+    return 0;
 }
 
 static int
-notify_send_sock(dns_sock_t *sock, char *zone_name)
+notify_send_message(dns_sock_t *sock, char *zone_name)
 {
     int len;
     dns_sock_buf_t sbuf;
 
     notify_log(sock, zone_name);
 
-    if ((len = notify_make_message(sbuf.sb_buf, sizeof(sbuf.sb_buf), zone_name)) < 0) {
-        dns_sock_free(sock);
+    if ((len = notify_make_message(sbuf.sb_buf, sizeof(sbuf.sb_buf), zone_name)) < 0)
         return -1;
-    }
 
     sbuf.sb_buflen = len;
     sbuf.sb_sock = sock;
 
-    if (dns_sock_send(&sbuf) < 0) {
-        dns_sock_free(sock);
+    if (dns_sock_send(&sbuf) < 0)
         return -1;
-    }
 
     dns_sock_timer_set(sock, NOTIFY_TIMEOUT, DNS_SOCK_TIMER_NOTIFY, zone_name);
 
@@ -204,6 +207,7 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
 
     /* XXX it shoule be ack-response from slave server. check it */
 
+    /* notify session end */
     dns_sock_free(sock);
     return 0;
 }
@@ -243,7 +247,7 @@ notify_sock_timeout(dns_sock_t *sock, void *zone_name)
         return;
     }
 
-    if (notify_send_sock(sock, zone_name) < 0) {
+    if (notify_send_message(sock, zone_name) < 0) {
         plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
         dns_sock_free(sock);
         return;
