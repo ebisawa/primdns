@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -81,7 +81,7 @@ static int sock_tcp_child_select(dns_sock_t *sock, int thread_id);
 static int sock_tcp_child_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int sock_tcp_child_getmsg(void *buf, int bufmax, int flags, dns_sock_t *sock);
 static int sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-static void sock_tcp_child_timeout(dns_sock_t *sock, void *udata);
+static void sock_tcp_child_timeout(dns_sock_t *sock);
 static int sock_set_refflag(dns_sock_t *sock, unsigned flag);
 
 static pthread_t SockThreads[DNS_SOCK_THREADS];
@@ -92,18 +92,17 @@ static dns_sock_event_t SockEventUdp, SockEventTcp;
 
 static dns_sock_prop_t SockPropUdp = {
     DNS_SOCK_CHAR_UDP, DNS_UDP_MSG_MAX,
-    sock_udp_select, sock_udp_recv, sock_udp_send, NULL,
+    sock_udp_select, sock_udp_recv, sock_udp_send,
 };
 
 static dns_sock_prop_t SockPropTcp = {
     DNS_SOCK_CHAR_TCP_L, 0,
-    sock_tcp_select, NULL, NULL, NULL,
+    sock_tcp_select, NULL, NULL,
 };
 
 static dns_sock_prop_t SockPropTcpChild = {
     DNS_SOCK_CHAR_TCP, DNS_TCP_MSG_MAX,
     sock_tcp_child_select, sock_tcp_child_recv, sock_tcp_child_send,
-    sock_tcp_child_timeout,
 };
 
 int
@@ -185,7 +184,7 @@ dns_sock_free(dns_sock_t *sock)
 }
 
 dns_sock_t *
-dns_sock_udp_add(int sock_fd, dns_sock_prop_t *sprop)
+dns_sock_udp_new(int sock_fd, dns_sock_prop_t *sprop)
 {
     dns_sock_t *sock;
 
@@ -208,59 +207,6 @@ dns_sock_udp_add(int sock_fd, dns_sock_prop_t *sprop)
     return sock;
 }
 
-void
-dns_sock_timer_proc(void)
-{
-    int i;
-    time_t now = time(NULL);
-    dns_sock_t *sock;
-
-    for (i = 0; i < NELEMS(SockPool); i++) {
-        sock = &SockPool[i];
-        if (sock->sock_state != SOCK_ACTIVE)
-            continue;
-        if (sock->sock_prop->sp_func_timeout == NULL)
-            continue;
-        if (sock->sock_timer.st_timeout == 0)
-            continue;
-
-        if (now > sock->sock_timer.st_lastevent + sock->sock_timer.st_timeout) {
-            plog(LOG_DEBUG, "%s: timeout event on sock %p", MODULE, sock);
-
-            sock->sock_timer.st_timeout = 0;
-            sock->sock_timer.st_tocount++;
-            sock->sock_timer.st_lastevent = now;
-
-            if (sock->sock_prop->sp_func_timeout != NULL)
-                sock->sock_prop->sp_func_timeout(sock, sock->sock_timer.st_udata);
-        }
-    }
-}
-
-void
-dns_sock_timer_set(dns_sock_t *sock, int timeout, int timer_id, void *udata)
-{
-    sock->sock_timer.st_id = timer_id;
-    sock->sock_timer.st_timeout = timeout;
-    sock->sock_timer.st_udata = udata;
-}
-
-void
-dns_sock_timer_cancel(int timer_id)
-{
-    int i;
-    dns_sock_t *sock;
-
-    for (i = 0; i < NELEMS(SockPool); i++) {
-        sock = &SockPool[i];
-        if (sock->sock_timer.st_id == timer_id) {
-            plog(LOG_DEBUG, "%s: timer cancelled: sock = %p", MODULE, sock);
-            sock->sock_timer.st_timeout = 0;
-            dns_sock_free(sock);
-        }
-    }
-}
-
 static void *
 sock_thread_routine(void *param)
 {
@@ -278,7 +224,6 @@ static int
 sock_proc(dns_sock_event_t *sev, int thread_id)
 {
     int i, count;
-    time_t now = time(NULL);
     dns_sock_t *sock, *rsocks[DNS_SOCK_EVENT_MAX];
 
     if ((count = dns_sock_event_wait(rsocks, NELEMS(rsocks), sev)) < 0)
@@ -292,7 +237,6 @@ sock_proc(dns_sock_event_t *sev, int thread_id)
             continue;
 
         plog(LOG_DEBUG, "%s: sock event (fd = %d)", MODULE, sock->sock_fd);
-        sock->sock_timer.st_lastevent = now;
 
         while (sock->sock_prop != NULL && sock->sock_prop->sp_func_select != NULL) {
             if (sock->sock_prop->sp_func_select(sock, thread_id) < 0)
@@ -397,10 +341,8 @@ sock_get(void)
     for (i = 0; i < NELEMS(SockPool); i++) {
         sock = &SockPool[i];
         if (sock->sock_state == SOCK_FREE) {
-            if (ATOMIC_CAS(&sock->sock_state, SOCK_FREE, SOCK_RESERVED)) {
-                sock->sock_timer.st_lastevent = time(NULL);
+            if (ATOMIC_CAS(&sock->sock_state, SOCK_FREE, SOCK_RESERVED))
                 return sock;
-            }
         }
     }
 
@@ -410,6 +352,7 @@ sock_get(void)
 static void
 sock_free(dns_sock_t *sock)
 {
+    dns_timer_cancel(&sock->sock_timer);
     plog(LOG_DEBUG, "%s: free sock = %p, fd = %d", MODULE, sock, sock->sock_fd);
 
     if (sock->sock_fd > 0) {
@@ -594,12 +537,14 @@ sock_tcp_child_init(dns_sock_t *sock, int child_fd)
 {
     sock->sock_fd = child_fd;
     sock->sock_prop = &SockPropTcpChild;
-    dns_sock_timer_set(sock, DNS_SOCK_TIMEOUT, DNS_SOCK_TIMER_TCP, NULL);
 
     if (sock_nonblock(sock) < 0) {
         plog(LOG_ERR, "%s: sock_nonblock() failed", MODULE);
         return -1;
     }
+
+    dns_timer_request(&sock->sock_timer, SEC2MS(DNS_SOCK_TIMEOUT),
+                      (dns_timer_func_t *) sock_tcp_child_timeout, sock, NULL);
 
     sock_activate(&SockEventTcp, sock);
 
@@ -716,7 +661,7 @@ sock_tcp_child_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 }
 
 static void
-sock_tcp_child_timeout(dns_sock_t *sock, void *udata)
+sock_tcp_child_timeout(dns_sock_t *sock)
 {
     plog(LOG_DEBUG, "%s: socket timeout: sock = %p", MODULE, sock);
 

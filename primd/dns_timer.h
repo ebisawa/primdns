@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2011-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,19 +31,25 @@
 #define __DNS_TIMER_H__
 
 typedef struct dns_timer dns_timer_t;
-typedef void (dns_timer_func_t)(void *);
+typedef void (dns_timer_func_t)(void *, void *);
 
 struct dns_timer {
     struct timeval      t_time;
+    unsigned            t_flags;
+    unsigned            t_tocount;
+    unsigned            t_magic;
     dns_timer_t        *t_prev;
     dns_timer_t        *t_next;
     dns_timer_func_t   *t_func;
-    void               *t_param;
+    void               *t_param1;
+    void               *t_param2;
 };
 
-int dns_timer_request(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param);
-int dns_timer_cancel(dns_timer_t *timer);
+void dns_timer_request(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param1, void *param2);
+void dns_timer_request_cont(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param1, void *param2);
+void dns_timer_cancel(dns_timer_t *timer);
+void dns_timer_execute(void);
+int dns_timer_tocount(dns_timer_t *timer);
 int dns_timer_next_timeout(struct timeval *timo);
-void dns_timer_execute();
 
 #endif

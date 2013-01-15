@@ -351,7 +351,7 @@ session_request_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock)
     int len;
 
     if ((len = dns_sock_recv(sbuf, sock)) < 0) {
-        /* read failed, socket closed by peer or receive incompleted */
+        /* read failed or socket closed by peer */
         return -1;
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,6 +53,8 @@
 #define STRLCPY(dst, src, max)   dns_util_strlcpy((dst), (src), (max))
 #define STRLCAT(dst, src, max)   dns_util_strlcat((dst), (src), (max))
 #define STRLOWER(str)            dns_util_strlower(str)
+
+#define SEC2MS(sec)              ((sec) * 1000)
 
 void dns_util_strlcpy(char *dst, char *src, int max);
 void dns_util_strlcat(char *dst, char *src, int max);

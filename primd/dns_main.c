@@ -429,7 +429,6 @@ main_loop(void)
 {
     for (;;) {
         dns_sock_proc();
-        dns_sock_timer_proc();  /* XXX */
         dns_timer_execute();
         main_signal_proc();
     }
@@ -478,7 +477,6 @@ static void
 main_sighup_proc(void)
 {
     plog(LOG_INFO, "SIGHUP received");
-    dns_sock_timer_cancel(DNS_SOCK_TIMER_NOTIFY);
     dns_config_update(Options.opt_config);
     dns_cache_invalidate(NULL);
 
@@ -490,6 +488,7 @@ static void
 main_sigterm_proc(void)
 {
     plog(LOG_INFO, "SIGTERM received. shutting down...");
+
     dns_config_shutdown();
     unlink(PATH_PID);
     exit(EXIT_SUCCESS);

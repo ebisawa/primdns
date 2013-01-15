@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2011-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -135,7 +135,8 @@ axfr_init(dns_engine_param_t *ep)
         conf->ac_retry = axfr_adjust_timer(retry, conf->ac_expire);
         conf->ac_expire_time = time(NULL) + conf->ac_expire;
 
-        dns_timer_request(&conf->ac_timer, conf->ac_refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+        dns_timer_request(&conf->ac_timer, SEC2MS(conf->ac_refresh),
+                          (dns_timer_func_t *) axfr_refresh, conf, NULL);
     }
 
     return 0;
@@ -210,7 +211,8 @@ axfr_do_axfr(axfr_config_t *conf, dns_tls_t *tls)
 
     if (!axfr_need_refresh(conf, tls)) {
         conf->ac_expire_time = time(NULL) + conf->ac_expire;
-        dns_timer_request(&conf->ac_timer, conf->ac_refresh * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+        dns_timer_request(&conf->ac_timer, SEC2MS(conf->ac_refresh),
+                          (dns_timer_func_t *) axfr_refresh, conf, NULL);
         return 0;
     }
 
@@ -298,7 +300,8 @@ axfr_set_retry_timer(axfr_config_t *conf)
     if (retry < AXFR_TIMER_MIN)
         retry = AXFR_TIMER_MIN;
 
-    dns_timer_request(&conf->ac_timer, retry * 1000, (dns_timer_func_t *) axfr_refresh, conf);
+    dns_timer_request(&conf->ac_timer, SEC2MS(retry),
+                      (dns_timer_func_t *) axfr_refresh, conf, NULL);
 }
 
 static void

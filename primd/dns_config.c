@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -239,11 +239,14 @@ config_read(char *filename)
 static void
 config_wait_update(void)
 {
-    for (;;) {
+    int i;
+
+    for (i = 0; ; i++) {
         if (dns_session_check_config() == 0)
             break;
+        if (i > 10)
+            plog(LOG_CRIT, "%s: session hang up", MODULE);
 
-        plog(LOG_DEBUG, "%s: waiting...", MODULE);
         sleep(1);
     }
 }

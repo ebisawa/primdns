@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2011-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,13 +54,12 @@ static int notify_make_message(char *buf, int bufmax, char *zone_name);
 static int notify_sock_select(dns_sock_t *sock, int thread_id);
 static int notify_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 static int notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf);
-static void notify_sock_timeout(dns_sock_t *sock, void *zone_name);
+static void notify_timeout(dns_sock_t *sock, void *zone_name);
 static void notify_log(dns_sock_t *sock, char *zone_name);
 
 static dns_sock_prop_t SockPropNotify = {
     DNS_SOCK_CHAR_NOTIFY, DNS_UDP_MSG_MAX,
-    notify_sock_select, notify_sock_recv,
-    notify_sock_send, notify_sock_timeout,
+    notify_sock_select, notify_sock_recv, notify_sock_send,
 };
 
 void
@@ -112,7 +111,7 @@ notify_send(struct sockaddr *to, char *zone_name)
         return -1;
     }
 
-    if ((sock = dns_sock_udp_add(s, &SockPropNotify)) == NULL) {
+    if ((sock = dns_sock_udp_new(s, &SockPropNotify)) == NULL) {
         plog_error(LOG_ERR, MODULE, "dns_sock_add_udp() failed");
         close(s);
         return -1;
@@ -144,7 +143,8 @@ notify_send_message(dns_sock_t *sock, char *zone_name)
     if (dns_sock_send(&sbuf) < 0)
         return -1;
 
-    dns_sock_timer_set(sock, NOTIFY_TIMEOUT, DNS_SOCK_TIMER_NOTIFY, zone_name);
+    dns_timer_request_cont(&sock->sock_timer, SEC2MS(NOTIFY_TIMEOUT),
+                           (dns_timer_func_t *) notify_timeout, sock, zone_name);
 
     return 0;
 }
@@ -197,6 +197,7 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
     dns_sock_buf_t sbuf;
 
     plog(LOG_DEBUG, "%s: receive event: fd = %d", __func__, sock->sock_fd);
+    dns_timer_cancel(&sock->sock_timer);
 
     if (dns_sock_recv(&sbuf, sock) < 0) {
         /* connection refused? -> stop sending */
@@ -209,6 +210,7 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
 
     /* notify session end */
     dns_sock_free(sock);
+
     return 0;
 }
 
@@ -237,18 +239,22 @@ notify_sock_send(dns_sock_t *sock, dns_sock_buf_t *sbuf)
 }
 
 static void
-notify_sock_timeout(dns_sock_t *sock, void *zone_name)
+notify_timeout(dns_sock_t *sock, void *zone_name)
 {
-    plog(LOG_DEBUG, "%s: timeout event: fd = %d, retry = %d",
-         MODULE, sock->sock_fd, sock->sock_timer.st_tocount);
+    int tocount = dns_timer_tocount(&sock->sock_timer);
 
-    if (sock->sock_timer.st_tocount > NOTIFY_RETRY) {
+    plog(LOG_DEBUG, "%s: timeout event: fd = %d, retry = %d",
+         MODULE, sock->sock_fd, tocount);
+
+    if (tocount >= NOTIFY_RETRY) {
+        dns_timer_cancel(&sock->sock_timer);
         dns_sock_free(sock);
         return;
     }
 
     if (notify_send_message(sock, zone_name) < 0) {
         plog(LOG_ERR, "%s: dns_notify_send() failed", MODULE);
+        dns_timer_cancel(&sock->sock_timer);
         dns_sock_free(sock);
         return;
     }
