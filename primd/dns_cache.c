@@ -347,17 +347,18 @@ cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls)
     if ((rrset = cache_rrset_new(q, tls)) == NULL)
         return NULL;
 
-    rrset->rrset_category = 0;
-    rrset->rrset_hits = 1;
-    rrset->rrset_expire = 0;
-    rrset->rrset_dns_rcode = DNS_RCODE_NOERROR;
-    rrset->rrset_dns_flags = 0;
-
     memcpy(&rrset->rrset_question, q, sizeof(*q));
     STRLOWER(rrset->rrset_question.mq_name);
 
-    dns_list_init(&rrset->rrset_list_cname);
+    rrset->rrset_category = 0;
+    rrset->rrset_refs = 0;
+    rrset->rrset_hits = 1;
+    rrset->rrset_dns_rcode = DNS_RCODE_NOERROR;
+    rrset->rrset_dns_flags = 0;
+    rrset->rrset_expire = 0;
+
     dns_list_init(&rrset->rrset_list_answer);
+    dns_list_init(&rrset->rrset_list_cname);
 
     return rrset;
 }
@@ -371,8 +372,6 @@ cache_rrset_new(dns_msg_question_t *q, dns_tls_t *tls)
         if ((rrset = cache_rrset_drain(tls)) == NULL)
             return NULL;
     }
-
-    cache_rrset_reset(rrset, tls);
 
     if (cache_rrset_retain(rrset) < 0)
         plog(LOG_CRIT, "%s: new rrset retain failed. why?", __func__);
