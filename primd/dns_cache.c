@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -351,7 +351,7 @@ cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls)
     STRLOWER(rrset->rrset_question.mq_name);
 
     rrset->rrset_category = 0;
-    rrset->rrset_refs = 0;
+    rrset->rrset_refs = 1;
     rrset->rrset_hits = 1;
     rrset->rrset_dns_rcode = DNS_RCODE_NOERROR;
     rrset->rrset_dns_flags = 0;
