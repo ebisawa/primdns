@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -96,8 +96,6 @@ main(int argc, char *argv[])
     main_args(argc, argv);
     main_confdir(ConfDir, sizeof(ConfDir), ConfPath);
     main_init_signal();
-
-    plog(LOG_DEBUG, "%s: confdir = %s", __func__, ConfDir);
 
     if (!Options.opt_foreground) {
         plog_setflag(DNS_LOG_FLAG_SYSLOG);
@@ -427,8 +425,11 @@ main_make_pidfile(void)
 static int
 main_loop(void)
 {
+    struct timeval tv, *tvp;
+
     for (;;) {
-        dns_sock_proc();
+        tvp = (dns_timer_next_timeout(&tv) < 0) ? NULL : &tv;
+        dns_sock_proc(tvp);
         dns_timer_execute();
         main_signal_proc();
     }

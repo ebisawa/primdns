@@ -86,7 +86,7 @@ struct dns_sock {
 
 int dns_sock_init(void);
 int dns_sock_start_thread(void);
-void dns_sock_proc(void);
+void dns_sock_proc(struct timeval *timeout);
 int dns_sock_recv(dns_sock_buf_t *sbuf, dns_sock_t *sock);
 int dns_sock_send(dns_sock_buf_t *sbuf);
 void dns_sock_free(dns_sock_t *sock);

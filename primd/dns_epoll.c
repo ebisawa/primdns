@@ -73,13 +73,16 @@ dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock)
 }
 
 int
-dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait)
+dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait, struct timeval *timeout)
 {
-    int i, count, max_wait;
+    int i, count, max_wait, timo_msec = -1;
     struct epoll_event events[DNS_SOCK_EVENT_MAX];
 
     max_wait = (sock_max < NELEMS(events)) ? sock_max : NELEMS(events);
-    if ((count = epoll_wait(swait->sev_fd, events, max_wait, 1100)) < 0) {
+    if (timeout != NULL)
+        timo_msec = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
+
+    if ((count = epoll_wait(swait->sev_fd, events, max_wait, timo_msec)) < 0) {
         if (errno == EINTR)
             return 0;
 

@@ -196,12 +196,12 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
 {
     dns_sock_buf_t sbuf;
 
-    plog(LOG_DEBUG, "%s: receive event: fd = %d", __func__, sock->sock_fd);
+    plog(LOG_DEBUG, "%s: receive event: fd = %d", MODULE, sock->sock_fd);
     dns_timer_cancel(&sock->sock_timer);
 
     if (dns_sock_recv(&sbuf, sock) < 0) {
         /* connection refused? -> stop sending */
-        plog(LOG_DEBUG, "%s: destination unreachable", __func__);
+        plog_error(LOG_ERR, MODULE, "%s: destination unreachable");
         dns_sock_free(sock);
         return -1;
     }

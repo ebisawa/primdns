@@ -35,6 +35,8 @@
 #include "dns_log.h"
 #include "dns_timer.h"
 
+#define MODULE "timer"
+
 #define TIMER_MAGIC         0xbeefbeef
 #define TIMER_CONTINUOUS    0x0001
 
@@ -67,11 +69,11 @@ void
 dns_timer_cancel(dns_timer_t *timer)
 {
     if (!timer_is_registered(timer)) {
-        /* plog(LOG_DEBUG, "%s: timer %p is not registered", __func__, timer); */
+        /* plog(LOG_DEBUG, "%s: timer %p is not registered", MODULE, timer); */
         return;
     }
 
-    plog(LOG_DEBUG, "%s: cancel timer %p", __func__, timer);
+    plog(LOG_DEBUG, "%s: cancel timer %p", MODULE, timer);
     timer_unregister(timer);
 }
 
@@ -136,11 +138,11 @@ static void
 timer_request(dns_timer_t *timer, int msec, dns_timer_func_t *timer_func, void *param1, void *param2, unsigned flags)
 {
     if (timer_is_registered(timer)) {
-        plog(LOG_DEBUG, "%s: timer %p has already been registered. cancel old timer.", __func__, timer);
+        plog(LOG_DEBUG, "%s: timer %p has already been registered. cancel old timer.", MODULE, timer);
         timer_unregister(timer);
     }
 
-    plog(LOG_DEBUG, "%s: request timer %p: %d ms", __func__, timer, msec);
+    plog(LOG_DEBUG, "%s: request timer %p: %d ms", MODULE, timer, msec);
 
     memset(timer, 0, sizeof(*timer));
     gettimeofday(&timer->t_time, NULL);

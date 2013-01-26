@@ -57,10 +57,10 @@
 
 int dns_sock_event_init(dns_sock_event_t *swait);
 int dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock);
-int dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait);
+int dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait, struct timeval *timeout);
 
 static void *sock_thread_routine(void *param);
-static int sock_proc(dns_sock_event_t *sev, int thread_id);
+static int sock_proc(dns_sock_event_t *sev, int thread_id, struct timeval *timeout);
 static int sock_listen(int type, struct sockaddr *sa);
 static int sock_listen_addr(int type, struct sockaddr *sa);
 static int sock_listen_wild(int type);
@@ -138,9 +138,9 @@ dns_sock_start_thread(void)
 }
 
 void
-dns_sock_proc(void)
+dns_sock_proc(struct timeval *timeout)
 {
-    sock_proc(&SockEventTcp, 0);
+    sock_proc(&SockEventTcp, 0, timeout);
 }
 
 int
@@ -215,18 +215,18 @@ sock_thread_routine(void *param)
     dns_util_sigmaskall();
 
     for (;;)
-        sock_proc(&SockEventUdp, thread_id);
+        sock_proc(&SockEventUdp, thread_id, NULL);
 
     return NULL;
 }
 
 static int
-sock_proc(dns_sock_event_t *sev, int thread_id)
+sock_proc(dns_sock_event_t *sev, int thread_id, struct timeval *timeout)
 {
     int i, count;
     dns_sock_t *sock, *rsocks[DNS_SOCK_EVENT_MAX];
 
-    if ((count = dns_sock_event_wait(rsocks, NELEMS(rsocks), sev)) < 0)
+    if ((count = dns_sock_event_wait(rsocks, NELEMS(rsocks), sev, timeout)) < 0)
         return -1;
 
     for (i = 0; i < count; i++) {

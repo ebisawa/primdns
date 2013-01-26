@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,7 +62,7 @@ dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock)
 
     EV_SET(&kev, sock->sock_fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, sock);
     if (kevent(swait->sev_fd, &kev, 1, NULL, 0, NULL) < 0) {
-        plog(LOG_DEBUG, "%s: kevent() failed", __func__);
+        plog_error(LOG_ERR, MODULE, "kevent() failed");
         return -1;
     }
 
@@ -70,17 +70,21 @@ dns_sock_event_add(dns_sock_event_t *swait, dns_sock_t *sock)
 }
 
 int
-dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait)
+dns_sock_event_wait(dns_sock_t **socks, int sock_max, dns_sock_event_t *swait, struct timeval *timeout)
 {
     int i, count, max_wait;
     struct kevent kev[DNS_SOCK_EVENT_MAX];
-    struct timespec ts;
+    struct timespec ts, *tsp = NULL;
 
     max_wait = (sock_max < NELEMS(kev)) ? sock_max : NELEMS(kev);
-    ts.tv_sec = 1;
-    ts.tv_nsec = 100 * 1000 * 1000;
 
-    if ((count = kevent(swait->sev_fd, NULL, 0, kev, max_wait, &ts)) < 0) {
+    if (timeout != NULL) {
+        ts.tv_sec = timeout->tv_sec;
+        ts.tv_nsec = timeout->tv_usec * 1000;
+        tsp = &ts;
+    }
+
+    if ((count = kevent(swait->sev_fd, NULL, 0, kev, max_wait, tsp)) < 0) {
         if (errno == EINTR)
             return 0;
 
