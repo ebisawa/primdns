@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -798,13 +798,12 @@ static dns_cache_rrset_t *
 session_query_glue(dns_session_t *session, dns_msg_question_t *q)
 {
     dns_config_zone_t *zone;
-    dns_cache_rrset_t *rrset;
 
     plog(LOG_DEBUG, "%s: query glue: %s %s %s", MODULE,
          q->mq_name, dns_proto_class_string(q->mq_class), dns_proto_type_string(q->mq_type));
 
     if ((zone = dns_config_find_zone(NULL, q->mq_name, q->mq_class)) == NULL)
-        return NULL;
+        zone = session->sess_zone;
 
     return session_query_internal(session, zone, q);
 }
@@ -814,16 +813,16 @@ session_query_internal(dns_session_t *session, dns_config_zone_t *zone, dns_msg_
 {
     dns_cache_rrset_t *rrset;
 
-    plog(LOG_DEBUG, "%s: internal query: %s %s %s (zone %s)",
+    plog(LOG_DEBUG, "%s: internal query: %s %s %s (zone \"%s\")",
          MODULE, q->mq_name,
          dns_proto_class_string(q->mq_class), dns_proto_type_string(q->mq_type),
          zone->z_name);
 
-    if ((rrset = dns_cache_lookup(q, DNS_CACHE_INTERNAL, &session->sess_tls)) == NULL) {
+    if ((rrset = dns_cache_lookup(q, DNS_CACHE_IZL(zone->z_id), &session->sess_tls)) == NULL) {
         if ((rrset = dns_engine_query(q, zone, &session->sess_tls)) == NULL)
             return NULL;
 
-        dns_cache_register(rrset, DNS_CACHE_INTERNAL, &session->sess_tls);
+        dns_cache_register(rrset, DNS_CACHE_IZL(zone->z_id), &session->sess_tls);
     }
 
     return rrset;
@@ -1118,11 +1117,15 @@ session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns
                 return;
             }
             break;
+
+        default:
+            goto next;
         }
 
         if (session_compare_question(q, &q_a) != 0)
             session_write_resources_ar_q(session, handle, &q_a);
 
+    next:
         cache = DNS_CACHE_LIST_NEXT(list, cache);
     }
 }

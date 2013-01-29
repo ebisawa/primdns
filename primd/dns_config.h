@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #include "dns_list.h"
 #include "dns_acl.h"
 
+#define DNS_CONFIG_ZONE_MAX        0x0fffffff
 #define DNS_CONFIG_ZONE_NAME_MAX   128
 
 #define DNS_CONFIG_ZONE_LIST_HEAD(list)        ((dns_config_zone_t *) dns_list_head((list)))
@@ -55,13 +56,15 @@ typedef struct {
 typedef struct {
     dns_list_elem_t            z_elem;
     char                       z_name[DNS_CONFIG_ZONE_NAME_MAX];
-    int                        z_class;
+    unsigned                   z_id;
+    unsigned                   z_class;
     dns_config_zone_search_t   z_search;
     dns_config_zone_slaves_t   z_slaves;
 } dns_config_zone_t;
 
 typedef struct {
     dns_list_t                 r_zone;
+    unsigned                   r_zone_count;
 } dns_config_root_t;
 
 int dns_config_update(char *name);

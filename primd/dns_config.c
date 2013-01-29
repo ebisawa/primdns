@@ -232,6 +232,7 @@ config_read(char *filename)
     }
 
     dns_file_close(&ctx.ctx_handle);
+    plog(LOG_DEBUG, "%s: %d zones", MODULE, root->r_zone_count);
 
     return root;
 }
@@ -323,6 +324,13 @@ config_parse_root(dns_config_root_t *root, config_context_t *ctx)
                 plog(LOG_ERR, "%s: insufficient memory", MODULE);
                 return -1;
             }
+
+            if (root->r_zone_count > DNS_CONFIG_ZONE_MAX) {
+                plog(LOG_ERR, "%s: too many zones", MODULE);
+                return -1;
+            }
+
+            zone->z_id = root->r_zone_count++;
 
             if (dns_acl_init(&zone->z_slaves.zss_acl) < 0) {
                 plog(LOG_ERR, "%s: dns_acl_init() failed", MODULE);

@@ -120,12 +120,10 @@ plog_dump(int level, const char *prefix, void *buf, int len)
 void
 plog_question(int level, char *module, char *msg, dns_msg_question_t *q, int category)
 {
-    char *catstr;
+    char *catstr = "";
 
-    switch (category) {
-    case DNS_CACHE_INTERNAL:  catstr = "(internal)";  break;
-    default:                  catstr = "";            break;
-    }
+    if (category >= DNS_CACHE_IZL_BASE)
+        catstr = "(internal/zonelocal)";
 
     plog(level, "%s: %s: \"%s\" %s %s %s",
          module, msg,

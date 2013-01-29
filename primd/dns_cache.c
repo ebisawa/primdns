@@ -77,8 +77,8 @@ static dns_mpool_t CachePool;
 
 static dns_cache_rrset_t *cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_new(dns_msg_question_t *q, dns_tls_t *tls);
-static dns_cache_rrset_t *cache_rrset_lookup(dns_msg_question_t *q, int category, cache_hash_t *hash, unsigned hvalue, dns_tls_t *tls);
-static int cache_rrset_compare(dns_cache_rrset_t *rrset, dns_msg_question_t *q, int category);
+static dns_cache_rrset_t *cache_rrset_lookup(dns_msg_question_t *q, unsigned category, cache_hash_t *hash, unsigned hvalue, dns_tls_t *tls);
+static int cache_rrset_compare(dns_cache_rrset_t *rrset, dns_msg_question_t *q, unsigned category);
 static int cache_rrset_refflag(dns_cache_rrset_t *rrset, int flag);
 static int cache_rrset_invalidate(dns_cache_rrset_t *rrset, cache_hash_t *hash, unsigned hvalue, dns_tls_t *tls);
 static int cache_rrset_retain(dns_cache_rrset_t *rrset);
@@ -95,7 +95,7 @@ static dns_cache_rrset_t *cache_rrset_drain(dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_drain_one(dns_tls_t *tls);
 static dns_cache_rrset_t *cache_rrset_drain_hash(cache_hash_t *hash, dns_tls_t *tls);
 static void cache_rrset_set_expire(dns_cache_rrset_t *rrset, dns_cache_res_t *cache);
-static cache_hash_t *cache_hash(unsigned *value, dns_msg_question_t *q, int category);
+static cache_hash_t *cache_hash(unsigned *value, dns_msg_question_t *q, unsigned category);
 static dns_cache_res_t *cache_get(dns_tls_t *tls);
 static dns_cache_res_t *cache_drain(dns_tls_t *tls);
 static void cache_init(dns_cache_res_t *cache, dns_msg_resource_t *res);
@@ -143,7 +143,7 @@ dns_cache_new(dns_msg_question_t *q, dns_tls_t *tls)
 }
 
 dns_cache_rrset_t *
-dns_cache_lookup(dns_msg_question_t *q, int category, dns_tls_t *tls)
+dns_cache_lookup(dns_msg_question_t *q, unsigned category, dns_tls_t *tls)
 {
     unsigned hvalue;
     cache_hash_t *hash;
@@ -245,7 +245,7 @@ dns_cache_merge(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_cache_rrset
 }
 
 void
-dns_cache_register(dns_cache_rrset_t *rrset, int category, dns_tls_t *tls)
+dns_cache_register(dns_cache_rrset_t *rrset, unsigned category, dns_tls_t *tls)
 {
     unsigned hvalue;
     cache_hash_t *hash;
@@ -380,7 +380,7 @@ cache_rrset_new(dns_msg_question_t *q, dns_tls_t *tls)
 }
 
 static dns_cache_rrset_t *
-cache_rrset_lookup(dns_msg_question_t *q, int category, cache_hash_t *hash, unsigned hvalue, dns_tls_t *tls)
+cache_rrset_lookup(dns_msg_question_t *q, unsigned category, cache_hash_t *hash, unsigned hvalue, dns_tls_t *tls)
 {
     int index;
     time_t now;
@@ -412,7 +412,7 @@ cache_rrset_lookup(dns_msg_question_t *q, int category, cache_hash_t *hash, unsi
 }
 
 static int
-cache_rrset_compare(dns_cache_rrset_t *rrset, dns_msg_question_t *q, int category)
+cache_rrset_compare(dns_cache_rrset_t *rrset, dns_msg_question_t *q, unsigned category)
 {
     dns_msg_question_t *r;
 
@@ -739,7 +739,7 @@ cache_rrset_set_expire(dns_cache_rrset_t *rrset, dns_cache_res_t *cache)
 }
 
 static cache_hash_t *
-cache_hash(unsigned *value, dns_msg_question_t *q, int category)
+cache_hash(unsigned *value, dns_msg_question_t *q, unsigned category)
 {
     unsigned h;
 
