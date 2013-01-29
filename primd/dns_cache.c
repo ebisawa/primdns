@@ -269,31 +269,31 @@ dns_cache_register(dns_cache_rrset_t *rrset, unsigned category, dns_tls_t *tls)
 }
 
 void
-dns_cache_setrcode(dns_cache_rrset_t *rrset, unsigned rcode)
+dns_cache_set_rcode(dns_cache_rrset_t *rrset, unsigned rcode)
 {
     rrset->rrset_dns_rcode = rcode;
 }
 
 void
-dns_cache_setflags(dns_cache_rrset_t *rrset, unsigned flags)
+dns_cache_set_flags(dns_cache_rrset_t *rrset, unsigned flags)
 {
     rrset->rrset_dns_flags |= flags;
 }
 
 void
-dns_cache_clearflags(dns_cache_rrset_t *rrset, unsigned flags)
+dns_cache_unset_flags(dns_cache_rrset_t *rrset, unsigned flags)
 {
     rrset->rrset_dns_flags &= ~flags;
 }
 
 unsigned
-dns_cache_getrcode(dns_cache_rrset_t *rrset)
+dns_cache_get_rcode(dns_cache_rrset_t *rrset)
 {
     return rrset->rrset_dns_rcode;
 }
 
 unsigned
-dns_cache_getflags(dns_cache_rrset_t *rrset)
+dns_cache_get_flags(dns_cache_rrset_t *rrset)
 {
     return rrset->rrset_dns_flags;
 }
@@ -349,7 +349,6 @@ cache_rrset_get(dns_msg_question_t *q, dns_tls_t *tls)
 
     memcpy(&rrset->rrset_question, q, sizeof(*q));
     STRLOWER(rrset->rrset_question.mq_name);
-
     rrset->rrset_category = 0;
     rrset->rrset_refs = 1;
     rrset->rrset_hits = 1;

@@ -48,6 +48,8 @@
 #define DNS_CACHE_IZL_BASE               0xf0000000
 #define DNS_CACHE_IZL(zid)               (DNS_CACHE_IZL_BASE + (zid))
 
+#define DNS_CACHE_NOANSWER               0x0001
+
 #define DNS_CACHE_LIST_HEAD(list)        ((dns_cache_res_t *) dns_list_head((list)))
 #define DNS_CACHE_LIST_NEXT(list, elem)  ((dns_cache_res_t *) dns_list_next((list), (dns_list_elem_t *) (elem)))
 
@@ -78,11 +80,11 @@ void dns_cache_delete_answers(dns_cache_rrset_t *rrset, dns_tls_t *tls);
 void dns_cache_negative(dns_cache_rrset_t *rrset, uint32_t ttl);
 void dns_cache_merge(dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_cache_rrset_t *rr_m, dns_tls_t *tls);
 void dns_cache_register(dns_cache_rrset_t *rrset, unsigned category, dns_tls_t *tls);
-void dns_cache_setrcode(dns_cache_rrset_t *rrset, unsigned rcode);
-void dns_cache_setflags(dns_cache_rrset_t *rrset, unsigned flags);
-void dns_cache_clearflags(dns_cache_rrset_t *rrset, unsigned flags);
-unsigned dns_cache_getrcode(dns_cache_rrset_t *rrset);
-unsigned dns_cache_getflags(dns_cache_rrset_t *rrset);
+void dns_cache_set_rcode(dns_cache_rrset_t *rrset, unsigned rcode);
+void dns_cache_set_flags(dns_cache_rrset_t *rrset, unsigned flags);
+void dns_cache_unset_flags(dns_cache_rrset_t *rrset, unsigned flags);
+unsigned dns_cache_get_rcode(dns_cache_rrset_t *rrset);
+unsigned dns_cache_get_flags(dns_cache_rrset_t *rrset);
 void dns_cache_invalidate(dns_tls_t *tls);
 void dns_cache_printstats(int s);
 

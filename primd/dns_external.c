@@ -124,7 +124,7 @@ external_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_questio
     plog(LOG_DEBUG, "%s: fd = %d", MODULE, fd);
     close(fd);
 
-    dns_cache_setflags(rrset, DNS_FLAG_AA);
+    dns_cache_set_flags(rrset, DNS_FLAG_AA);
 
     return 0;
 }
@@ -247,7 +247,7 @@ external_read_buf(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *buf, in
     if (count == 0)
         dns_cache_negative(rrset, 0);
 
-    dns_cache_setrcode(rrset, rcode);
+    dns_cache_set_rcode(rrset, rcode);
 
     return 0;
 }

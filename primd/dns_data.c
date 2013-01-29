@@ -323,8 +323,8 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
     hash = &conf->conf_hash[hashval];
 
     if ((index = data_query_search_head(conf, hash, q)) < 0) {
-        dns_cache_setrcode(rrset, DNS_RCODE_NXDOMAIN);
-        dns_cache_setflags(rrset, DNS_FLAG_AA);
+        dns_cache_set_rcode(rrset, DNS_RCODE_NXDOMAIN);
+        dns_cache_set_flags(rrset, DNS_FLAG_AA);
         dns_cache_negative(rrset, 0);
     } else {
         if ((record = data_hash_record(conf, hash)) == NULL)
@@ -351,11 +351,11 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
         }
 
         if (count == 0) {
-            dns_cache_setrcode(rrset, DNS_RCODE_NOERROR);
+            dns_cache_set_rcode(rrset, DNS_RCODE_NOERROR);
             dns_cache_negative(rrset, 0);
         }
 
-        dns_cache_setflags(rrset, DNS_FLAG_AA);
+        dns_cache_set_flags(rrset, DNS_FLAG_AA);
     }
 
     return count;

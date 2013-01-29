@@ -275,7 +275,7 @@ forward_msg_parse(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *buf, in
     }
 
     dns_msg_read_close(&handle);
-    dns_cache_setrcode(rrset, rcode);
+    dns_cache_set_rcode(rrset, rcode);
 
     return 0;
 }

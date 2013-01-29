@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 Satoshi Ebisawa. All rights reserved.
+ * Copyright (c) 2010-2013 Satoshi Ebisawa. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,11 +41,11 @@
 
 typedef struct {
     /* must be initialized by session_init() */
-    u_int16_t                 sess_msgid;
-    u_int16_t                 sess_flags;
+    u_int16_t                 sess_dns_msgid;
+    u_int16_t                 sess_dns_flags;
     u_int16_t                 sess_edns_version;
     u_int16_t                 sess_edns_bufsize;
-    u_int32_t                 sess_extflags;
+    u_int32_t                 sess_iflags;
     dns_msg_question_t        sess_question;
     dns_msg_question_t        sess_qlast;
     int                       sess_opcode;

@@ -54,7 +54,8 @@
 #define NONBLOCK  1
 
 #define SESSION_EDNS_REQUESTED   0x0001
-#define SESSION_NO_NCACHE        0x0002
+#define SESSION_NO_NEGCACHE      0x0002
+#define SESSION_NO_ANSWER        0x0004
 
 #define IS_VALID_QUESTION(q)     ((q)->mq_class != 0 && (q)->mq_type != 0)
 
@@ -310,11 +311,11 @@ session_request_multi(dns_sock_t *sock, int thread_id)
 static void
 session_init(dns_session_t *session, uint16_t msgid, uint16_t flags)
 {
-    session->sess_msgid = msgid;
-    session->sess_flags = flags;
+    session->sess_dns_msgid = msgid;
+    session->sess_dns_flags = flags;
     session->sess_edns_version = 0;
     session->sess_edns_bufsize = 0;
-    session->sess_extflags = 0;
+    session->sess_iflags = 0;
     session->sess_opcode = 0;
 
     memset(&session->sess_question, 0, sizeof(session->sess_question));
@@ -587,7 +588,7 @@ session_read_edns_opt(dns_session_t *session, dns_sock_buf_t *sbuf, dns_msg_hand
     ver = (opt.mr_ttl & 0x00ff0000) >> 16;
     session->sess_edns_version = ver;
     session->sess_edns_bufsize = opt.mr_q.mq_class;
-    session->sess_extflags |= SESSION_EDNS_REQUESTED;
+    session->sess_iflags |= SESSION_EDNS_REQUESTED;
 
     plog(LOG_DEBUG, "%s: edns version = %d", MODULE, session->sess_edns_version);
     plog(LOG_DEBUG, "%s: edns bufsize = %d", MODULE, session->sess_edns_bufsize);
@@ -638,22 +639,23 @@ session_query_authority(dns_session_t *session, dns_cache_rrset_t *rrset_an)
     dns_msg_question_t *q;
     dns_cache_rrset_t *rrset_ns = NULL;
 
-    if (dns_list_count(&rrset_an->rrset_list_answer) == 0) {
-        if ((rrset_ns = session_query_referral(session)) != NULL) {
-            dns_cache_setrcode(rrset_an, DNS_RCODE_NOERROR);
+    /* referral */
+    if ((rrset_ns = session_query_referral(session)) != NULL) {
+        dns_cache_set_rcode(rrset_an, DNS_RCODE_NOERROR);
+        session->sess_iflags |= SESSION_NO_ANSWER;
 
-            if (dns_list_count(&rrset_an->rrset_list_cname) == 0)
-                dns_cache_clearflags(rrset_an, DNS_FLAG_AA);
+        if (dns_list_count(&rrset_an->rrset_list_cname) == 0)
+            dns_cache_unset_flags(rrset_an, DNS_FLAG_AA);
 
-            return rrset_ns;
-        }
+        return rrset_ns;
     }
 
-    if (dns_cache_getflags(rrset_an) & DNS_FLAG_AA) {
+    /* authority */
+    if (dns_cache_get_flags(rrset_an) & DNS_FLAG_AA) {
         q = &session->sess_question;
 
         if (dns_list_count(&rrset_an->rrset_list_answer) == 0) {
-            if ((session->sess_extflags & SESSION_NO_NCACHE) == 0)
+            if ((session->sess_iflags & SESSION_NO_NEGCACHE) == 0)
                 rrset_ns = session_query_zone(session, q, DNS_TYPE_SOA);
         } else {
             if (q->mq_type != DNS_TYPE_NS)
@@ -748,7 +750,7 @@ session_query_cname(dns_session_t *session, dns_msg_question_t *q, dns_cache_rrs
 
     if ((zone = dns_config_find_zone(&session->sess_zone_exact,
                                      q_cname.mq_name, q_cname.mq_class)) == NULL) {
-        session->sess_extflags |= SESSION_NO_NCACHE;
+        session->sess_iflags |= SESSION_NO_NEGCACHE;
         return;
     }
 
@@ -908,8 +910,8 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
     resmax = SOCK_MSGMAX(sbuf->sb_sock);
     resmax = session_max_payload_size(session, resmax);
 
-    rcode = dns_cache_getrcode(rrset_an);
-    flags = dns_cache_getflags(rrset_an);
+    rcode = dns_cache_get_rcode(rrset_an);
+    flags = dns_cache_get_flags(rrset_an);
 
     if (dns_msg_write_open(&handle, sbuf->sb_buf, resmax) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_open() failed", MODULE);
@@ -921,14 +923,18 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
 
     /* answer */
     session_write_resources(session, &handle, &rrset_an->rrset_list_cname, DNS_MSG_RESTYPE_ANSWER);
-    session_write_resources_rr(session, &handle, &rrset_an->rrset_list_answer, DNS_MSG_RESTYPE_ANSWER);
+    if ((session->sess_iflags & SESSION_NO_ANSWER) == 0) {
+        session_write_resources_rr(session, &handle, &rrset_an->rrset_list_answer, DNS_MSG_RESTYPE_ANSWER);
+    }
 
     /* authority & additional */
     if (rrset_ns != NULL)
         session_write_resources_rr(session, &handle, &rrset_ns->rrset_list_answer, DNS_MSG_RESTYPE_AUTHORITY);
 
-    session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_A);
-    session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_AAAA);
+    if ((session->sess_iflags & SESSION_NO_ANSWER) == 0) {
+        session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_A);
+        session_write_resources_ar(session, &handle, &rrset_an->rrset_list_answer, DNS_TYPE_AAAA);
+    }
 
     if (rrset_ns != NULL) {
         session_write_resources_ar(session, &handle, &rrset_ns->rrset_list_answer, DNS_TYPE_A);
@@ -936,7 +942,7 @@ session_make_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_cache_rr
     }
 
     /* edns opt */
-    if (session->sess_extflags & SESSION_EDNS_REQUESTED)
+    if (session->sess_iflags & SESSION_EDNS_REQUESTED)
         session_write_resources_opt(session, &handle);
 
     if ((sbuf->sb_buflen = dns_msg_write_close(&handle)) < 0) {
@@ -976,7 +982,7 @@ session_make_axfr_response(dns_sock_buf_t *sbuf, dns_session_t *session, dns_msg
      * first response message and MAY do so in subsequent response messages
      */
 #if 0   /* we don't send OPT RR in AXFR response */
-    if (session->sess_extflags & SESSION_EDNS_REQUESTED)
+    if (session->sess_iflags & SESSION_EDNS_REQUESTED)
         session_write_resources_opt(session, &handle);
 #endif
 
@@ -1030,8 +1036,8 @@ session_make_error(dns_sock_buf_t *sbuf, dns_session_t *session, int rcode, int 
 static int
 session_write_header(dns_session_t *session, dns_msg_handle_t *handle, void *buf, int rcode, int flags)
 {
-    if (dns_msg_write_header(handle, session->sess_msgid,
-                             session->sess_flags | DNS_FLAG_QR | flags) < 0) {
+    if (dns_msg_write_header(handle, session->sess_dns_msgid,
+                             session->sess_dns_flags | DNS_FLAG_QR | flags) < 0) {
         plog(LOG_ERR, "%s: dns_msg_write_header() failed", MODULE);
         return -1;
     }
@@ -1192,7 +1198,7 @@ session_max_payload_size(dns_session_t *session, int defmax)
 {
     int max_size = defmax;
 
-    if (session->sess_extflags & SESSION_EDNS_REQUESTED) {
+    if (session->sess_iflags & SESSION_EDNS_REQUESTED) {
         if (session->sess_edns_bufsize > defmax)
             max_size = session->sess_edns_bufsize;
         if (max_size > DNS_MSG_MAX)

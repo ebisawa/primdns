@@ -57,7 +57,7 @@ dns_engine_t ServerIdEngine = {
 static int
 serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_question_t *q, dns_tls_t *tls)
 {
-    dns_cache_setflags(rrset, DNS_FLAG_AA);
+    dns_cache_set_flags(rrset, DNS_FLAG_AA);
 
     if (q->mq_type == DNS_TYPE_TXT || q->mq_type == DNS_TYPE_ALL) {
         if (q->mq_class == DNS_CLASS_CH || q->mq_class == DNS_CLASS_ANY) {
@@ -75,7 +75,7 @@ serverid_query(dns_engine_param_t *ep, dns_cache_rrset_t *rrset, dns_msg_questio
         }
     }
 
-    dns_cache_setrcode(rrset, DNS_RCODE_NXDOMAIN);
+    dns_cache_set_rcode(rrset, DNS_RCODE_NXDOMAIN);
     dns_cache_negative(rrset, 0);
 
     return 0;
