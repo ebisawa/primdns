@@ -71,7 +71,7 @@ test 'Query CNAME (referring to delegated zone)' do
     assert_flags 'qr', 'aa'
     assert_answer 'x.sub.example.com', 'CNAME'
     assert_authority 'ns.example.jp'
-    assert_noadditional
+    assert_additional '192.0.2.100'
   end
 end
 
