@@ -118,7 +118,6 @@ static void session_write_resources_rr(dns_session_t *session, dns_msg_handle_t 
 static void session_write_resources_ar(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int type);
 static void session_write_resources_ar_q(dns_session_t *session, dns_msg_handle_t *handle, dns_msg_question_t *q);
 static void session_write_resources_opt(dns_session_t *session, dns_msg_handle_t *handle);
-static void session_shuffle_resources(dns_session_t *session, dns_msg_resource_t **res, int num);
 static int session_max_payload_size(dns_session_t *session, int defmax);
 static int session_compare_question(dns_msg_question_t *a, dns_msg_question_t *b);
 
@@ -1063,6 +1062,7 @@ session_write_resources(dns_session_t *session, dns_msg_handle_t *handle, dns_li
     dns_cache_res_t *cache;
 
     cache = DNS_CACHE_LIST_HEAD(list);
+
     while (cache != NULL) {
         if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0)
             break;
@@ -1074,25 +1074,33 @@ session_write_resources(dns_session_t *session, dns_msg_handle_t *handle, dns_li
 static void
 session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns_list_t *list, int restype)
 {
-    int i, j;
+    int i, shift;
     dns_cache_res_t *cache;
-    dns_msg_resource_t *cres[32];
+
+    shift = session->sess_dns_msgid % dns_list_count(list);
+    cache = DNS_CACHE_LIST_HEAD(list);
+
+    for (i = 0; i < shift; i++)
+        cache = DNS_CACHE_LIST_NEXT(list, cache);
+
+    while (cache != NULL) {
+        if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0) {
+            /* message truncated */
+            return;
+        }
+
+        cache = DNS_CACHE_LIST_NEXT(list, cache);
+    }
 
     cache = DNS_CACHE_LIST_HEAD(list);
-    while (cache != NULL) {
-        for (i = 0; cache != NULL && i < NELEMS(cres); i++) {
-            cres[i] = &cache->cache_res;
-            cache = DNS_CACHE_LIST_NEXT(list, cache);
+
+    for (i = 0; i < shift; i++) {
+        if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0) {
+            /* message truncated */
+            return;
         }
 
-        session_shuffle_resources(session, cres, i);
-
-        for (j = 0; j < i; j++) {
-            if (dns_msg_write_resource(handle, cres[j], restype) < 0) {
-                /* message truncated */
-                return;
-            }
-        }
+        cache = DNS_CACHE_LIST_NEXT(list, cache);
     }
 }
 
@@ -1170,27 +1178,6 @@ session_write_resources_opt(dns_session_t *session, dns_msg_handle_t *handle)
         res.mr_ttl = DNS_XRCODE_BADVERS << 24;
 
     dns_msg_write_resource(handle, &res, DNS_MSG_RESTYPE_ADDITIONAL);
-}
-
-static void
-session_shuffle_resources(dns_session_t *session, dns_msg_resource_t **res, int num)
-{
-    void *p;
-    int i, s;
-    unsigned rand;
-
-    rand = xarc4random(&session->sess_tls.tls_arctx);
-
-    for (i = 0; i < num; i++) {
-        if (rand & 1) {
-            s = rand % num;
-            p = res[i];
-            res[i] = res[s];
-            res[s] = p;
-        }
-
-        rand = (rand >> 1) + rand;
-    }
 }
 
 static int
