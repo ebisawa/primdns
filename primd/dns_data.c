@@ -315,6 +315,7 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
     dns_msg_resource_t res;
     data_hash_t *hash;
     data_record_t *record, *p;
+    uint32_t name_offset;
 
     if (conf->conf_hashsize == 0)
         return -1;
@@ -330,9 +331,11 @@ data_query_resource(dns_cache_rrset_t *rrset, data_config_t *conf, dns_msg_quest
         if ((record = data_hash_record(conf, hash)) == NULL)
             return -1;
 
+        name_offset = record[index].dr_name_offset;
+
         for (i = index; i < ntohl(hash->dh_count); i++) {
             p = &record[i];
-            if (data_record_compare_name(p, conf, q->mq_name) != 0)
+            if (p->dr_name_offset != name_offset)
                 break;
             if (data_record_compare_class_type(p, q) != 0)
                 continue;
