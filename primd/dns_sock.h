@@ -39,7 +39,7 @@
 #define DNS_SOCK_THREADS        2
 #define DNS_SOCK_TIMEOUT        2
 #define DNS_SOCK_TCP_MAX     1024
-#define DNS_SOCK_EVENT_MAX     32
+#define DNS_SOCK_EVENT_MAX      1
 
 #define DNS_SOCK_CHAR_UDP     'u'
 #define DNS_SOCK_CHAR_TCP     't'
