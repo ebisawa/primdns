@@ -1077,31 +1077,31 @@ session_write_resources_rr(dns_session_t *session, dns_msg_handle_t *handle, dns
     int i, shift;
     dns_cache_res_t *cache;
 
+    if ((cache = DNS_CACHE_LIST_HEAD(list)) == NULL)
+        return;
+
+    /* round robin answers */
     shift = session->sess_dns_msgid % dns_list_count(list);
-    cache = DNS_CACHE_LIST_HEAD(list);
 
-    for (i = 0; i < shift; i++)
+    for (i = 0; i < shift && cache != NULL; i++)
         cache = DNS_CACHE_LIST_NEXT(list, cache);
 
-    while (cache != NULL) {
-        if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0) {
-            /* message truncated */
-            return;
-        }
-
-        cache = DNS_CACHE_LIST_NEXT(list, cache);
+    for (; cache != NULL; cache = DNS_CACHE_LIST_NEXT(list, cache)) {
+        if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0)
+            goto truncated;
     }
 
+    /* bottom */
     cache = DNS_CACHE_LIST_HEAD(list);
 
-    for (i = 0; i < shift; i++) {
-        if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0) {
-            /* message truncated */
-            return;
-        }
-
-        cache = DNS_CACHE_LIST_NEXT(list, cache);
+    for (i = 0; i < shift; i++, cache = DNS_CACHE_LIST_NEXT(list, cache)) {
+        if (dns_msg_write_resource(handle, &cache->cache_res, restype) < 0)
+            goto truncated;
     }
+
+truncated:
+    /* message truncated */
+    return;
 }
 
 static void
