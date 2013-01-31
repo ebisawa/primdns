@@ -74,9 +74,13 @@ def primish(n)
 end
 
 def get_hashsize(count)
+  if $options[:hashsize] != nil
+    return $options[:hashsize]
+  end
+
   (0..1000).each do |n|
     v = primish(n)
-    if (count / v) < 32
+    if (count / v) < 8
       return v
     end
   end
@@ -142,6 +146,24 @@ end
 #     !                                                               !
 #     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #
+#
+#  RESOURCE INDEX:
+#
+#                          1                   2                   3
+#      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !             TYPE              !             CLASS             !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                              TTL                              !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !           Name Lenth          !           Data Length         !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                          Name Offset                          !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#     !                          Data Offset                          !
+#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#
+RESOURCE_INDEX_SIZE = 20
 
 class DataFile
   def initialize(hashsize)
@@ -294,25 +316,6 @@ class DataBlock
     ((len + 3) / 4) * 4
   end
 end
-
-#
-#  RESOURCE INDEX:
-#
-#                          1                   2                   3
-#      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#     !             TYPE              !             CLASS             !
-#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#     !                              TTL                              !
-#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#     !           Name Lenth          !           Data Length         !
-#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#     !                          Name Offset                          !
-#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#     !                          Data Offset                          !
-#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#
-RESOURCE_INDEX_SIZE = 20
 
 class Record
   attr_reader :r_name, :r_ttl, :r_data
@@ -952,6 +955,7 @@ ARGV.options do |opt|
   opt.on('-t',       'tiny-style zone file')    {|v| $options[:tinyzone] = v }
   opt.on('--stdin',  'read source from stdin')  {|v| $options[:stdin] = v }
   opt.on('--sighup', 'send sighup to daemon')   {|v| $options[:sighup] = v }
+  opt.on('--hashsize SIZE', 'hash table size')  {|v| $options[:hashsize] = v }
   opt.parse!
 end
 
