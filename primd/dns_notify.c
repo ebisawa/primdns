@@ -201,7 +201,6 @@ notify_sock_select(dns_sock_t *sock, int thread_id)
 
     if (dns_sock_recv(&sbuf, sock) < 0) {
         /* connection refused? -> stop sending */
-        plog_error(LOG_ERR, MODULE, "%s: destination unreachable");
         dns_sock_free(sock);
         return -1;
     }
