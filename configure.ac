@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.61])
-AC_INIT([primdns], [current])
+AC_INIT([primdns], [0.9])
 AC_CONFIG_SRCDIR([primd/dns.h])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([foreign no-installinfo no-installman])
