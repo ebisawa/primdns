@@ -7,5 +7,5 @@ Standards-Version: 3.7.3
 
 Package: primdns
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, ruby
+Depends: ${shlibs:Depends}, ${misc:Depends}, ruby1.9.3 | ruby1.9.1 | ruby
 Description: DNS contents server
