@@ -57,7 +57,7 @@ typedef struct {
     dns_list_elem_t            z_elem;
     char                       z_name[DNS_CONFIG_ZONE_NAME_MAX];
     unsigned                   z_id;
-    unsigned                   z_class;
+    int                        z_class;
     dns_config_zone_search_t   z_search;
     dns_config_zone_slaves_t   z_slaves;
 } dns_config_zone_t;
