@@ -102,6 +102,7 @@ external_setarg(dns_engine_param_t *ep, char *arg)
     external_config_t *conf = (external_config_t *) ep->ep_conf;
 
     STRLCPY(conf->conf_cmdpath, arg, sizeof(conf->conf_cmdpath));
+    plog(LOG_DEBUG, "%s: script = %s", MODULE, conf->conf_cmdpath);
 
     return 0;
 }
@@ -271,16 +272,14 @@ external_read_line(dns_cache_rrset_t *rrset, dns_msg_question_t *q, char *line, 
     }
 
     for (i = 0; i < NELEMS(ResParseFunc) && p != NULL; i++) {
-        if (ResParseFunc[i](&res, p) < 0) {
-            plog(LOG_ERR, "%s: invalid response format (element)", MODULE);
+        if (ResParseFunc[i](&res, p) < 0)
             return -1;
-        }
 
         p = strtok_r(NULL, sep, &last);
     }
 
     if (i != NELEMS(ResParseFunc)) {
-        plog(LOG_ERR, "%s: invalid response format (number of elements)", MODULE);
+        plog(LOG_ERR, "%s: invalid response format", MODULE);
         return -1;
     }
 
@@ -336,8 +335,19 @@ external_data_parse(dns_msg_resource_t *res, char *p)
 
     switch (res->mr_q.mq_type) {
     case DNS_TYPE_A:
-        inet_pton(AF_INET, p, res->mr_data);
+        if (inet_pton(AF_INET, p, res->mr_data) != 1) {
+            plog(LOG_ERR, "%s: invalid ipv4 address format", MODULE);
+            return -1;
+        }
         res->mr_datalen = 4;
+        break;
+
+    case DNS_TYPE_AAAA:
+        if (inet_pton(AF_INET6, p, res->mr_data) != 1) {
+            plog(LOG_ERR, "%s: invalid ipv6 address format", MODULE);
+            return -1;
+        }
+        res->mr_datalen = 16;
         break;
 
     case DNS_TYPE_PTR:
