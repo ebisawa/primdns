@@ -102,7 +102,7 @@ static void session_query_cname(dns_session_t *session, dns_msg_question_t *q, d
 static int session_query_zone_resource(dns_msg_resource_t *res, dns_session_t *session, dns_msg_question_t *q, int type);
 static dns_cache_rrset_t *session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type);
 static dns_cache_rrset_t *session_query_glue(dns_session_t *session, dns_msg_question_t *q);
-static dns_cache_rrset_t *session_query_internal(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q);
+static dns_cache_rrset_t *session_query_internal(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q, dns_msg_question_extra_t *ex);
 static void session_send_response(dns_sock_buf_t *sbuf);
 static void session_send_finish(dns_sock_buf_t *sbuf);
 static int session_send_immediate(dns_sock_buf_t *sbuf);
@@ -692,18 +692,20 @@ static dns_cache_rrset_t *
 session_query_referral_do(dns_session_t *session, char *name)
 {
     dns_msg_question_t q_ns;
+    dns_msg_question_extra_t q_ex;
     dns_cache_rrset_t *rrset;
 
     STRLCPY(q_ns.mq_name, name, sizeof(q_ns.mq_name));
     q_ns.mq_type = DNS_TYPE_NS;
     q_ns.mq_class = session->sess_qlast.mq_class;
+    q_ex.referral = 1;
 
     plog(LOG_DEBUG, "%s: query referral: %s %s %s",
          MODULE, q_ns.mq_name,
          dns_proto_class_string(q_ns.mq_class),
          dns_proto_type_string(q_ns.mq_type));
 
-    if ((rrset = session_query_internal(session, session->sess_zone, &q_ns)) != NULL) {
+    if ((rrset = session_query_internal(session, session->sess_zone, &q_ns, &q_ex)) != NULL) {
         if (dns_list_count(&rrset->rrset_list_answer) > 0)
             return rrset;
 
@@ -718,7 +720,7 @@ session_query_recursive(dns_session_t *session, dns_config_zone_t *zone, dns_msg
 {
     dns_cache_rrset_t *rrset;
 
-    if ((rrset = dns_engine_query(q, zone, &session->sess_tls)) != NULL) {
+    if ((rrset = dns_engine_query(q, zone, &session->sess_tls, NULL)) != NULL) {
         if (dns_list_count(&rrset->rrset_list_cname) > 0)
             session_query_cname(session, q, rrset, nlevel + 1);
     }
@@ -792,7 +794,7 @@ session_query_zone(dns_session_t *session, dns_msg_question_t *q, int type)
     q_z.mq_type = type;
     q_z.mq_class = q->mq_class;
 
-    return session_query_internal(session, session->sess_zone, &q_z);
+    return session_query_internal(session, session->sess_zone, &q_z, NULL);
 }
 
 static dns_cache_rrset_t *
@@ -806,11 +808,11 @@ session_query_glue(dns_session_t *session, dns_msg_question_t *q)
     if ((zone = dns_config_find_zone(NULL, q->mq_name, q->mq_class)) == NULL)
         zone = session->sess_zone;
 
-    return session_query_internal(session, zone, q);
+    return session_query_internal(session, zone, q, NULL);
 }
 
 static dns_cache_rrset_t *
-session_query_internal(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q)
+session_query_internal(dns_session_t *session, dns_config_zone_t *zone, dns_msg_question_t *q, dns_msg_question_extra_t *ex)
 {
     dns_cache_rrset_t *rrset;
 
@@ -820,7 +822,7 @@ session_query_internal(dns_session_t *session, dns_config_zone_t *zone, dns_msg_
          zone->z_name);
 
     if ((rrset = dns_cache_lookup(q, DNS_CACHE_IZL(zone->z_id), &session->sess_tls)) == NULL) {
-        if ((rrset = dns_engine_query(q, zone, &session->sess_tls)) == NULL)
+        if ((rrset = dns_engine_query(q, zone, &session->sess_tls, ex)) == NULL)
             return NULL;
 
         dns_cache_register(rrset, DNS_CACHE_IZL(zone->z_id), &session->sess_tls);
