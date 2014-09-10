@@ -69,7 +69,7 @@ dns_engine_t *dns_engine_find(char *name);
 int dns_engine_setarg(dns_engine_t *engine, dns_config_zone_t *zone, void *conf, char *arg);
 int dns_engine_init(dns_engine_t *engine, dns_config_zone_t *zone, void *conf);
 int dns_engine_destroy(dns_engine_t *engine, void *conf);
-dns_cache_rrset_t *dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls);
+dns_cache_rrset_t *dns_engine_query(dns_msg_question_t *q, dns_config_zone_t *zone, dns_tls_t *tls, dns_msg_question_extra_t *ex);
 int dns_engine_notify(dns_config_zone_t *zone, struct sockaddr *remote, dns_tls_t *tls);
 int dns_engine_dump_init(dns_engine_dump_t *edump, dns_config_zone_t *zone);
 int dns_engine_dump_next(dns_msg_resource_t *res, dns_engine_dump_t *edump);

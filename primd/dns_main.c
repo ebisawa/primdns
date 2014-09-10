@@ -234,7 +234,6 @@ main_args(int argc, char *argv[])
             case 'v':
                 main_version();
                 break;
-
             case 'M':
                 if (argv[++i] == NULL) {
                     fprintf(stderr, "error: missing cache pool size\n");
@@ -248,6 +247,9 @@ main_args(int argc, char *argv[])
                     exit(EXIT_FAILURE);
                 }
                 Options.opt_threads = atoi(argv[i]);
+                break;
+            case 'R':
+                Options.opt_recursion = 1;
                 break;
             case '-':
                 break;   /* ignore */
@@ -280,6 +282,7 @@ main_usage(void)
     puts("          -v           show version");
     puts("          -M [size]    cache pool size in MB");
     puts("          -T [num]     number of worker threads");
+    puts("          -R           allow recursion query");
 
     exit(EXIT_FAILURE);
 }

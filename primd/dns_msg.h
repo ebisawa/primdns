@@ -48,6 +48,10 @@ typedef struct {
 } dns_msg_question_t;
 
 typedef struct {
+    int referral;
+} dns_msg_question_extra_t;
+
+typedef struct {
     dns_msg_question_t  mr_q;
     uint32_t            mr_ttl;
     uint16_t            mr_datalen;
